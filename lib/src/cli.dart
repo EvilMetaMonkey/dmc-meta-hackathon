@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'agent_hooks.dart';
 import 'checkpoint_service.dart';
 import 'checkpoint_restore_service.dart';
 import 'daemon.dart';
@@ -556,6 +557,11 @@ Future<int> _runDiffCommand(ArgResults command) async {
 
 /// Parse command-line arguments and execute the appropriate command
 Future<int> runCli(List<String> args) async {
+  // Agent hooks bypass normal parsing: they must exit 0 with empty stdout
+  // even for arguments this version does not understand.
+  if (args.isNotEmpty && args.first == 'agent-hook') {
+    return runAgentHookCommand(args.sublist(1));
+  }
   try {
     return await _runCli(args);
   } on FormatException catch (e) {
@@ -778,6 +784,9 @@ Future<int> _runCli(List<String> args) async {
     print('  checkpoint restore|redo <id> [--dry-run|--apply] [--json]');
     print(
       '  checkpoint recover <operation-id> (--resume|--rollback) [--preview] [--json]',
+    );
+    print(
+      '  agent-hook <muse-code|claude-code> <event>  Checkpoint an agent turn (called by agent hooks)',
     );
     print(
       '  gc [--dry-run]       Prune expired snapshots using retention config',

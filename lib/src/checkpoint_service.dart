@@ -60,7 +60,11 @@ class CheckpointService {
     return 'cp_${timestamp.toRadixString(36)}_$suffix';
   }
 
-  Future<CommandResult> begin({String? label, String source = 'manual'}) async {
+  Future<CommandResult> begin({
+    String? label,
+    String source = 'manual',
+    CheckpointAgentContext? agent,
+  }) async {
     const command = 'checkpoint.begin';
     final normalizedSource = source.trim();
     final normalizedLabel = label?.trim();
@@ -126,6 +130,7 @@ class CheckpointService {
           source: normalizedSource,
           createdAt: createdAt,
           policyFingerprint: 'unavailable',
+          agent: agent,
         );
         checkpointCreated = true;
         repository.addIssue(
@@ -157,6 +162,7 @@ class CheckpointService {
         source: normalizedSource,
         createdAt: createdAt,
         policyFingerprint: policy.fingerprint,
+        agent: agent,
       );
       checkpointCreated = true;
 
@@ -263,7 +269,23 @@ class CheckpointService {
     }
   }
 
-  Future<CommandResult> close(String id) async {
+  Future<CommandResult> close(String id) => _close(id: id);
+
+  /// Close the active checkpoint only if [owns] accepts it. Ownership is
+  /// checked under the same workspace lock as the close, so another DMC
+  /// process cannot swap the active checkpoint in between. For an agent
+  /// checkpoint, the transcript at [transcriptPath] (or the path recorded at
+  /// begin) is measured and recorded.
+  Future<CommandResult> closeActive({
+    required bool Function(CheckpointRecord checkpoint) owns,
+    String? transcriptPath,
+  }) => _close(owns: owns, transcriptPath: transcriptPath);
+
+  Future<CommandResult> _close({
+    String? id,
+    bool Function(CheckpointRecord checkpoint)? owns,
+    String? transcriptPath,
+  }) async {
     const command = 'checkpoint.close';
     final paths = DmcPaths(basePath: basePath);
     final database = DmcDatabase(paths.dbPath);
@@ -280,19 +302,37 @@ class CheckpointService {
       commandLock = WorkspaceOperationLock.acquire(paths);
       database.initialize();
       final repository = CheckpointRepository(database);
-      var checkpoint = repository.getCheckpoint(id);
+      var checkpoint = id == null
+          ? repository.getActiveCheckpoint()
+          : repository.getCheckpoint(id);
       if (checkpoint == null) {
+        return id == null
+            ? machineFailure(
+                command,
+                5,
+                'no_active_checkpoint',
+                'No checkpoint is active.',
+              )
+            : machineFailure(
+                command,
+                5,
+                'checkpoint_not_found',
+                'Checkpoint $id was not found.',
+              );
+      }
+      final checkpointId = checkpoint.id;
+      if (owns != null && !owns(checkpoint)) {
         return machineFailure(
           command,
-          5,
-          'checkpoint_not_found',
-          'Checkpoint $id was not found.',
+          3,
+          'checkpoint_not_owned',
+          'Checkpoint $checkpointId (source ${checkpoint.source}) is active and belongs to another owner.',
         );
       }
       if (checkpoint.status == CheckpointStatus.closed) {
         return _viewResult(
           command,
-          repository.getView(id)!,
+          repository.getView(checkpointId)!,
           includeFiles: false,
         );
       }
@@ -302,18 +342,18 @@ class CheckpointService {
           command,
           3,
           'checkpoint_not_open',
-          'Checkpoint $id is ${checkpoint.status.name} and cannot be closed.',
+          'Checkpoint $checkpointId is ${checkpoint.status.name} and cannot be closed.',
         );
       }
 
       final policy = await _loadPolicy(paths);
-      repository.prepareClose(id);
-      final issues = repository.getIssues(id);
+      repository.prepareClose(checkpointId);
+      final issues = repository.getIssues(checkpointId);
       if (policy.fingerprint != checkpoint.policyFingerprint) {
         _addIssue(
           repository,
           issues,
-          checkpointId: id,
+          checkpointId: checkpointId,
           phase: 'close',
           code: 'policy_changed',
           message:
@@ -323,7 +363,7 @@ class CheckpointService {
       } else {
         final store = _storeFactory(database, paths.snapshotsPath);
         final before = {
-          for (final file in repository.getFiles(id))
+          for (final file in repository.getFiles(checkpointId))
             if (file.beforeKind == CheckpointFileKind.file &&
                 file.beforeSnapshotId != null &&
                 file.beforeHash != null)
@@ -335,7 +375,7 @@ class CheckpointService {
         };
         final after = <String, _CapturedFile>{};
         final scan = await scanWorkspace(paths, policy.rules);
-        _recordScanIssues(repository, id, 'close', scan, issues);
+        _recordScanIssues(repository, checkpointId, 'close', scan, issues);
         if (scan.errors.isEmpty) {
           for (final filePath in [...scan.files]..sort()) {
             final relative = p.normalize(
@@ -347,7 +387,7 @@ class CheckpointService {
               filePath,
               relative,
               policy.config.maxFileSizeBytes,
-              id,
+              checkpointId,
               'close',
               repository,
               issues,
@@ -357,7 +397,7 @@ class CheckpointService {
                 _addIssue(
                   repository,
                   issues,
-                  checkpointId: id,
+                  checkpointId: checkpointId,
                   phase: 'close',
                   filePath: relative,
                   code: 'protected_file_excluded',
@@ -372,7 +412,7 @@ class CheckpointService {
             final prior = before[relative];
             if (prior == null) {
               repository.addCreatedFile(
-                checkpointId: id,
+                checkpointId: checkpointId,
                 filePath: relative,
                 snapshotId: captured.snapshotId,
                 hash: captured.hash,
@@ -380,7 +420,7 @@ class CheckpointService {
               );
             } else {
               repository.setAfterFile(
-                checkpointId: id,
+                checkpointId: checkpointId,
                 filePath: relative,
                 snapshotId: captured.snapshotId,
                 hash: captured.hash,
@@ -398,7 +438,10 @@ class CheckpointService {
             final absolute = p.join(paths.rootPath, relative);
             if (FileSystemEntity.typeSync(absolute, followLinks: false) ==
                 FileSystemEntityType.notFound) {
-              repository.setAfterAbsent(checkpointId: id, filePath: relative);
+              repository.setAfterAbsent(
+                checkpointId: checkpointId,
+                filePath: relative,
+              );
             }
           }
           await _verifyCurrentManifest(
@@ -408,35 +451,45 @@ class CheckpointService {
             store: store,
             expected: after,
             expectedAbsent: before.keys.toSet().difference(after.keys.toSet()),
-            checkpointId: id,
+            checkpointId: checkpointId,
             phase: 'close',
             repository: repository,
             issues: issues,
           );
           _verifyStoredManifest(
             paths,
-            repository.getFiles(id),
+            repository.getFiles(checkpointId),
             repository,
             issues,
-            id,
+            checkpointId,
           );
         }
       }
 
-      final finalIssues = repository.getIssues(id);
+      final finalIssues = repository.getIssues(checkpointId);
       final fatalCount = finalIssues.where((issue) => issue.fatal).length;
       final exclusionCount = finalIssues.where((issue) => !issue.fatal).length;
+      if (checkpoint.agent != null) {
+        final path = transcriptPath ?? checkpoint.agent!.transcriptPath;
+        final measured = path == null ? null : await measureTranscript(path);
+        repository.setAgentTranscript(
+          checkpointId,
+          path: path,
+          bytes: measured?.bytes,
+          sha256: measured?.sha256,
+        );
+      }
       repository.finishClose(
-        id,
+        checkpointId,
         valid: fatalCount == 0,
         closedAt: _now(),
         fatalErrors: fatalCount,
         exclusions: exclusionCount,
       );
-      checkpoint = repository.getCheckpoint(id)!;
+      checkpoint = repository.getCheckpoint(checkpointId)!;
       return _viewResult(
         command,
-        repository.getView(id)!,
+        repository.getView(checkpointId)!,
         exitCode: checkpoint.status == CheckpointStatus.closed ? 0 : 3,
         includeFiles: false,
       );
@@ -1015,6 +1068,28 @@ class CheckpointService {
           .map((operation) => operation.toJson())
           .toList(),
     };
+  }
+}
+
+/// Size and SHA-256 of the bytes of the agent transcript at [path], read in
+/// one pass. Null when the path is not a readable regular file.
+Future<({int bytes, String sha256})?> measureTranscript(String path) async {
+  try {
+    if (FileSystemEntity.typeSync(path) != FileSystemEntityType.file) {
+      return null;
+    }
+    var bytes = 0;
+    final digest = await sha256
+        .bind(
+          File(path).openRead().map((chunk) {
+            bytes += chunk.length;
+            return chunk;
+          }),
+        )
+        .first;
+    return (bytes: bytes, sha256: digest.toString());
+  } on FileSystemException {
+    return null;
   }
 }
 

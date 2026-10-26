@@ -114,3 +114,40 @@ The Muse fixtures in `test/fixtures/agent_hooks/muse_code/` are synthetic, built
 - Claude Code reports a `transcript_path` for a file that does not exist when the turn failed
   before anything was written. dmc records no size or hash when the file is missing.
 - The verification ran on Linux as root, not on the planned Mac.
+
+## Using it
+
+The rest of this page describes what dmc builds on these facts.
+
+### `dmc agent-hook <agent> <event>`
+
+`agent` is `muse-code` or `claude-code`. The event comes from argv; stdin JSON is optional.
+
+| Event | Action |
+|---|---|
+| UserPromptSubmit | `checkpoint begin --source <agent>`, labelled with the prompt's first line (≤ 100 characters) |
+| Stop, StopFailure, SessionEnd (both agents), Interrupt (Muse) | close the active checkpoint if this agent and session own it |
+| SessionStart and anything else | nothing |
+
+- **Workspace:** walk up from payload `cwd` (else the process cwd) to the nearest directory that
+  contains `.dmc/`. With no workspace, the hook does nothing.
+- **Missing stdin:** if stdin is empty, invalid or not an object, the hook rebuilds a minimal
+  payload from argv, the process cwd and the session env (`MUSE_SESSION_ID`, then
+  `MUSE_THREAD_ID` for Muse; `CLAUDE_CODE_SESSION_ID` for Claude Code).
+- **Missed Stop:** on UserPromptSubmit, an active checkpoint owned by the same agent and session
+  is closed first. One owned by anything else (a manual checkpoint, Haven, another session) is
+  left alone, the new checkpoint is skipped, and a warning goes to stderr.
+- **Ownership:** the active checkpoint is checked and closed under one workspace lock, so another
+  dmc process cannot swap it in between.
+- **Lock:** a busy workspace lock is retried for up to 5 seconds. Capture itself is not
+  interruptible, so the hook timeout must cover a full workspace scan; the installer sets 60
+  seconds.
+- **Never blocks the agent:** the command always exits 0, prints nothing on stdout, and sends
+  warnings to stderr.
+
+Agent context is stored per checkpoint (schema 4): `agent`, `sessionId`, `turnId`,
+`transcriptPath` and, at close, `transcriptBytes` and `transcriptSha256` of the transcript
+bytes read at that moment. For Muse, a missing `transcript_path` falls back to the session's
+`session.jsonl` found by session ID. It appears as an additive `agent` object (null for
+non-agent checkpoints) in machine schema 1 output, and in `checkpoint show`, `checkpoint list`
+and `status`.
