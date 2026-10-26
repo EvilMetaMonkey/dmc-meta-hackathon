@@ -281,6 +281,8 @@ Use `docs/TESTER-READINESS-AUDIT.md` as the original audit and the Phase 2/3 han
 - `dart run bin/dmc.dart checkpoint diff <checkpoint-id>`
 - `dart run bin/dmc.dart checkpoint release <checkpoint-id>`
 - `dart run bin/dmc.dart capabilities --json`
+- `dart run bin/dmc.dart hooks install --agent claude-code --dmc-command "dart run <repo>/bin/dmc.dart"` (preview; add `--apply` to write; see `docs/AGENT-HOOKS.md`)
+- `dmc agent-hook <muse-code|claude-code> <event>` (called by agent hooks; always exits 0 with empty stdout)
 - `dart test`
 - `dart analyze`
 - `dart run tool/check_analyzer.dart` (CI gate; fails on any analyzer diagnostic)

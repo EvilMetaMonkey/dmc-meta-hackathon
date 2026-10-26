@@ -60,6 +60,11 @@ Stdin payload fields (all snake_case):
   `CLAUDE_CODE_SESSION_ID` (= `session_id`), `CLAUDE_PROJECT_DIR` (the repo root) and, on
   SessionStart only, `CLAUDE_ENV_FILE`. Hooks run in the session cwd.
 
+End to end: with hooks written by `dmc hooks install --agent claude-code --apply` (local scope,
+compiled bundle), a real `claude -p` turn that wrote `greeting.txt` produced one closed checkpoint
+labelled with the prompt, with `greeting.txt: created`, the session ID, the `prompt_id` as turn
+ID, and the transcript's size and SHA-256 at Stop.
+
 Not verified: whether `Stop` fires when a turn is cancelled with Esc. With no `Interrupt` event,
 dmc treats the next `UserPromptSubmit` from the same session as the close for a cancelled turn
 (see "Missed Stop" below).
@@ -151,3 +156,17 @@ bytes read at that moment. For Muse, a missing `transcript_path` falls back to t
 `session.jsonl` found by session ID. It appears as an additive `agent` object (null for
 non-agent checkpoints) in machine schema 1 output, and in `checkpoint show`, `checkpoint list`
 and `status`.
+
+### `dmc hooks install|uninstall|status --agent <agent> [--scope …] [--apply]`
+
+| Agent | `project` | `local` | `user` | Default |
+|---|---|---|---|---|
+| claude-code | `<root>/.claude/settings.json` | `<root>/.claude/settings.local.json` | `~/.claude/settings.json` | `local` (verified) |
+| muse-code | `<root>/.muse/hooks.json` (assumed shape) | not supported | `~/.config/muse/settings.json` | `user` (spike-verified only) |
+
+- `install` and `uninstall` preview the exact change and write only with `--apply`.
+- Entries call an absolute path to the running dmc executable. Under `dart run`, pass
+  `--dmc-command "<shell command>"`; the same value must be passed to `uninstall` and `status`.
+- Install merges into existing config and is idempotent. Uninstall removes only handlers whose
+  `command` exactly matches the one dmc would write, and leaves every other hook untouched.
+- Muse's Interrupt handler is registered with `"async": true`.
