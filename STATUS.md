@@ -12,11 +12,12 @@ Last updated: 2026-10-26 by Claude (setup session)
 - Repository marked as the hackathon entry: `HACKATHON.md`, README banner, clone instructions,
   agent notes in `CLAUDE.md`.
 - `STATUS.md` added, with update rules in `AGENTS.md` and `CLAUDE.md`.
+- Published to GitHub as public `EvilMetaMonkey/dmc-meta-hackathon`: `main`, the `pre-hackathon`
+  and `v1.0.0` tags, description and topics. Verified with `git ls-remote` and the GitHub API.
 
 ## In progress
 
-- Publishing the repository to GitHub as public `EvilMetaMonkey/dmc-meta-hackathon` (history and
-  tags pushed, description and topics set).
+- Nothing yet.
 
 ## Broken
 
@@ -34,4 +35,5 @@ Last updated: 2026-10-26 by Claude (setup session)
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
 
-- 2026-10-26 · Claude · Created the hackathon repository, marked it, and added this file.
+- 2026-10-26 · Claude · Created the hackathon repository, marked it, added this file, and
+  published it to GitHub.
