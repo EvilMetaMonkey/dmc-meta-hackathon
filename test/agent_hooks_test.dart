@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
 import 'package:dmc/dmc.dart';
@@ -11,6 +12,17 @@ import 'package:test/test.dart';
 const museSession = '22222222-3333-4444-8555-666666666666';
 const claudeSession = '11111111-2222-4333-8444-555555555555';
 
+/// The package root, resolved from `package:dmc` rather than the process cwd:
+/// `dart test` runs files in parallel isolates of one process, and other test
+/// files change `Directory.current`.
+final String packageRoot = p.dirname(
+  p.dirname(
+    Isolate.resolvePackageUriSync(
+      Uri.parse('package:dmc/dmc.dart'),
+    )!.toFilePath(),
+  ),
+);
+
 /// A fixture payload with `cwd` (and optionally other fields) replaced.
 String fixture(
   String agentDirectory,
@@ -19,7 +31,14 @@ String fixture(
   Map<String, Object?> overrides = const {},
 }) {
   final file = File(
-    p.join('test', 'fixtures', 'agent_hooks', agentDirectory, '$name.json'),
+    p.join(
+      packageRoot,
+      'test',
+      'fixtures',
+      'agent_hooks',
+      agentDirectory,
+      '$name.json',
+    ),
   );
   final payload = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
   return jsonEncode({...payload, 'cwd': cwd, ...overrides});
