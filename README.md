@@ -1,5 +1,9 @@
 # dmc
 
+> **Meta AI Developer Hackathon 2026 entry.** This repository is a hackathon build on top of
+> [dmc](https://github.com/EvilMetaMonkey/dmc). Everything up to the `pre-hackathon` tag (commit `d177c4b`)
+> existed before the event, and every commit after it is hackathon work. See [HACKATHON.md](HACKATHON.md).
+
 Local file history for coding projects, including changes made by AI tools.
 
 dmc runs beside your editor, records eligible file versions in a local `.dmc/` folder, and lets you inspect, restore, and redo a selected version. It does not require a model, an AI subscription, or Haven.
@@ -38,8 +42,8 @@ On macOS/Linux, the executable is `bin/dmc`. If macOS resolves `dmc` to Apple's 
 You need repository access, this revision of the source, Git, and the Dart SDK. CI uses Dart **3.11.5**. The development changes must be published to the revision you check out; cloning an older main branch does not install them.
 
 ```sh
-git clone https://github.com/EvilMetaMonkey/dmc.git
-cd dmc
+git clone https://github.com/EvilMetaMonkey/dmc-meta-hackathon.git
+cd dmc-meta-hackathon
 dart pub get --enforce-lockfile
 dart test
 dart run tool/check_analyzer.dart

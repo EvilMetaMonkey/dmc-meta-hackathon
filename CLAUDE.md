@@ -5,6 +5,11 @@ authoritative, current guide to dmc's architecture, phase status, safety rules,
 database schema, commands, and verification gates. This file used to describe
 the original single-table prototype; that description is obsolete.
 
+**This is the Meta AI Developer Hackathon 2026 repository.** Read
+**[HACKATHON.md](HACKATHON.md)** too. Everything up to the `pre-hackathon` tag is
+pre-existing dmc work; everything after it is hackathon work and must stay that way
+(never rewrite or squash history before the tag).
+
 Quick reference (details in AGENTS.md):
 
 ```bash
