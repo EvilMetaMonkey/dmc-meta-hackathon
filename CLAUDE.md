@@ -10,6 +10,10 @@ the original single-table prototype; that description is obsolete.
 pre-existing dmc work; everything after it is hackathon work and must stay that way
 (never rewrite or squash history before the tag).
 
+**Keep [STATUS.md](STATUS.md) current.** Read it at the start of every session, update
+it whenever a task finishes or something breaks, and always update it before the
+session ends. The rules are in AGENTS.md under "Session status".
+
 Quick reference (details in AGENTS.md):
 
 ```bash

@@ -1,5 +1,28 @@
 # AGENTS.md
 
+## Session status (STATUS.md)
+[STATUS.md](STATUS.md) is the running record of this hackathon build. Every coding agent working in
+this repository, whatever the tool, must keep it current:
+
+- **At the start of a session**, read `STATUS.md` before doing anything else.
+- **During a session**, update it whenever a task finishes, something breaks or gets fixed, or the
+  plan changes. Do not wait until the end.
+- **At the end of every session**, update it before you stop, even if the session was short or
+  nothing worked.
+
+Each update must keep the four sections accurate:
+
+- **Done:** finished and verified work. Say how it was verified (tests, analyzer, manual check).
+- **In progress:** started but not finished, with enough detail for the next agent to pick it up.
+- **Broken:** known failures, failing tests and regressions, with the exact command or symptom.
+- **Next:** the ordered list of what to do next.
+
+Also update the `Last updated` line (date and agent) and add one line to the session log, newest
+first. Keep it factual: never mark anything done that was not verified, and never drop a broken
+item without saying how it was fixed. Commit `STATUS.md` with the work it describes.
+
+---
+
 ## Project Summary
 dmc is a Dart CLI for local shadow-history version control designed for AI-assisted coding workflows. It watches project files, debounces rapid changes, stores snapshot metadata plus hashed backups in a hidden repo-local `.dmc/` SQLite vault, restores prior file states quickly, and can diff a working file against historical snapshots.
 
@@ -213,13 +236,14 @@ These rules are critical because dmc is a recovery tool.
 
 ## Implementation Workflow for Agents
 Before making changes:
-1. Inspect the relevant files first.
+1. Read `STATUS.md`, then inspect the relevant files.
 2. Briefly explain the implementation plan.
 3. List the files you intend to modify.
 4. Make the smallest clean change that fits the existing architecture.
 5. Do not rewrite unrelated code.
 6. Add or update tests.
 7. Summarize what changed and note any follow-up work.
+8. Update `STATUS.md` (see Session status above).
 
 When implementing a feature:
 - preserve current behavior unless the task explicitly changes it
