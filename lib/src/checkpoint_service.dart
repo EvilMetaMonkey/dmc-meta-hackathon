@@ -1018,14 +1018,25 @@ class CheckpointService {
   }
 }
 
+/// Human-readable agent context for a checkpoint's JSON `agent` object.
+List<String> checkpointAgentLines(Map<dynamic, dynamic> agent) {
+  final bytes = agent['transcriptBytes'];
+  final sha256 = agent['transcriptSha256'];
+  return [
+    'Agent: ${agent['name']}; session: ${agent['sessionId'] ?? '(unknown)'}; turn: ${agent['turnId'] ?? '(unknown)'}',
+    'Transcript: ${agent['transcriptPath'] ?? '(unknown)'}${bytes == null ? '' : ' ($bytes bytes, sha256 $sha256)'}',
+  ];
+}
+
 List<String> checkpointHumanLines(CommandResult result) {
   final lines = <String>[];
   final checkpoints = result.data['checkpoints'];
   if (checkpoints is List) {
     lines.add('[DMC] Checkpoints: ${checkpoints.length}');
     for (final item in checkpoints.whereType<Map>()) {
+      final agent = item['agent'];
       lines.add(
-        '${item['id']}  ${item['status']}  ${item['changedFileCount'] ?? 0} changed  ${item['label'] ?? '(no label)'}',
+        '${item['id']}  ${item['status']}  ${item['changedFileCount'] ?? 0} changed  ${item['label'] ?? '(no label)'}${agent is Map ? '  [${agent['name']}]' : ''}',
       );
     }
   }
@@ -1041,6 +1052,8 @@ List<String> checkpointHumanLines(CommandResult result) {
       lines.add(
         'Source: ${checkpoint['source']}; label: ${checkpoint['label'] ?? '(none)'}',
       );
+      final agent = checkpoint['agent'];
+      if (agent is Map) lines.addAll(checkpointAgentLines(agent));
     }
     final files = result.data['files'];
     if (files is List) {

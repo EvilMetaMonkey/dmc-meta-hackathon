@@ -46,7 +46,7 @@ void main() {
         ..writeAsStringSync('new work');
       final db = DmcDatabase(paths.dbPath)..initialize();
       try {
-        expect(db.db.select('PRAGMA user_version').first.values.first, 3);
+        expect(db.db.select('PRAGMA user_version').first.values.first, 4);
         expect(db.db.select('PRAGMA foreign_keys').first.values.first, 1);
         expect(db.db.select('PRAGMA synchronous').first.values.first, 2);
         expect(db.getSnapshotById(42)!.hash, hash);
@@ -160,7 +160,7 @@ void main() {
       versionOne.close();
 
       final migrated = DmcDatabase(paths.dbPath)..initialize();
-      expect(migrated.db.select('PRAGMA user_version').single.values.first, 3);
+      expect(migrated.db.select('PRAGMA user_version').single.values.first, 4);
       expect(migrated.getSnapshotById(7)!.filePath, 'keep.txt');
       expect(
         migrated.db.select(
@@ -192,11 +192,14 @@ void main() {
     versionTwo.execute('DROP TABLE checkpoint_operations');
     versionTwo.execute('ALTER TABLE checkpoint_files DROP COLUMN before_mode');
     versionTwo.execute('ALTER TABLE checkpoint_files DROP COLUMN after_mode');
+    for (final column in _agentColumns) {
+      versionTwo.execute('ALTER TABLE checkpoints DROP COLUMN $column');
+    }
     versionTwo.execute('PRAGMA user_version = 2');
     versionTwo.close();
 
     final migrated = DmcDatabase(paths.dbPath)..initialize();
-    expect(migrated.db.select('PRAGMA user_version').single.values.first, 3);
+    expect(migrated.db.select('PRAGMA user_version').single.values.first, 4);
     expect(migrated.getHistoryCount(), 1);
     expect(
       migrated.db.select(
@@ -205,6 +208,84 @@ void main() {
       hasLength(2),
     );
     migrated.close();
+  });
+
+  test('version 3 vault gains agent context without rewriting checkpoints', () {
+    final initial = DmcDatabase(paths.dbPath)..initialize();
+    CheckpointRepository(initial).createCheckpoint(
+      id: 'cp_v3',
+      label: 'before agent hooks',
+      source: 'haven',
+      createdAt: 10,
+      policyFingerprint: 'policy',
+    );
+    CheckpointRepository(initial).finishClose(
+      'cp_v3',
+      valid: true,
+      closedAt: 11,
+      fatalErrors: 0,
+      exclusions: 0,
+    );
+    initial.close();
+    final versionThree = sqlite.sqlite3.open(paths.dbPath);
+    for (final column in _agentColumns) {
+      versionThree.execute('ALTER TABLE checkpoints DROP COLUMN $column');
+    }
+    versionThree.execute('PRAGMA user_version = 3');
+    versionThree.close();
+
+    final migrated = DmcDatabase(paths.dbPath)..initialize();
+    try {
+      expect(migrated.db.select('PRAGMA user_version').single.values.first, 4);
+      final columns = {
+        for (final row in migrated.db.select('PRAGMA table_info(checkpoints)'))
+          row['name'] as String,
+      };
+      expect(columns, containsAll(_agentColumns));
+      final repository = CheckpointRepository(migrated);
+      final existing = repository.getCheckpoint('cp_v3')!;
+      expect(existing.label, 'before agent hooks');
+      expect(existing.source, 'haven');
+      expect(existing.agent, isNull);
+      expect(existing.toJson()['agent'], isNull);
+
+      repository.createCheckpoint(
+        id: 'cp_v4',
+        label: 'agent turn',
+        source: 'muse-code',
+        createdAt: 20,
+        policyFingerprint: 'policy',
+        agent: const CheckpointAgentContext(
+          agent: 'muse-code',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+        ),
+      );
+      repository.setAgentTranscript(
+        'cp_v4',
+        path: '/transcript.jsonl',
+        bytes: 12,
+        sha256: 'abc',
+      );
+      repository.setAgentTranscript(
+        'cp_v3',
+        path: '/ignored.jsonl',
+        bytes: 1,
+        sha256: 'ignored',
+      );
+      final agent = repository.getCheckpoint('cp_v4')!.agent!;
+      expect(agent.toJson(), {
+        'name': 'muse-code',
+        'sessionId': 'session-1',
+        'turnId': 'turn-1',
+        'transcriptPath': '/transcript.jsonl',
+        'transcriptBytes': 12,
+        'transcriptSha256': 'abc',
+      });
+      expect(repository.getCheckpoint('cp_v3')!.agent, isNull);
+    } finally {
+      migrated.close();
+    }
   });
 
   test('newer schema is rejected without adding or rewriting tables', () {
@@ -233,3 +314,12 @@ void main() {
     }
   });
 }
+
+const _agentColumns = [
+  'agent',
+  'agent_session_id',
+  'agent_turn_id',
+  'agent_transcript_path',
+  'agent_transcript_bytes',
+  'agent_transcript_sha256',
+];

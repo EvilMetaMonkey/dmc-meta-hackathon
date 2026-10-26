@@ -31,6 +31,7 @@ Future<int> showStatus({
   var dbSizeBytes = 0;
   var totalSnapshots = 0;
   String? checkpointSummary;
+  String? agentSummary;
   String? operationSummary;
   if (dmcDirExists) {
     final dbFile = File(paths.dbPath);
@@ -48,6 +49,11 @@ Future<int> showStatus({
       final view = checkpoints.getView(checkpoint.id)!;
       checkpointSummary =
           '${checkpoint.id} (${checkpoint.status.name}; ${view.protectedFileCount} protected, ${view.changedFileCount} changed, ${checkpoint.exclusionCount} excluded, ${checkpoint.fatalErrorCount} fatal)';
+      final agent = checkpoint.agent;
+      if (agent != null) {
+        agentSummary =
+            '${agent.agent} (session ${agent.sessionId ?? 'unknown'}, turn ${agent.turnId ?? 'unknown'})';
+      }
     }
     final incomplete = CheckpointOperationRepository(db).incomplete();
     if (incomplete.isNotEmpty) {
@@ -80,6 +86,7 @@ Future<int> showStatus({
   print('DB size bytes: $dbSizeBytes');
   print('Total snapshots: $totalSnapshots');
   print('Checkpoint: ${checkpointSummary ?? 'none'}');
+  if (agentSummary != null) print('Checkpoint agent: $agentSummary');
   print('Incomplete checkpoint operation: ${operationSummary ?? 'none'}');
   print('Retention hours: ${config.retentionHours}');
   print('Max file size KB: ${config.maxFileSizeKb}');

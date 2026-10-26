@@ -11,7 +11,7 @@ bool isTombstoneSnapshot({required String hash, required String snapshotPath}) {
 
 /// Database manager for DMC's SQLite storage
 class DmcDatabase {
-  static const schemaVersion = 3;
+  static const schemaVersion = 4;
   final String dbPath;
   Database? _db;
   Directory? _readCopy;
@@ -89,6 +89,11 @@ class DmcDatabase {
         if (version < 3) {
           _migrateToVersion3();
           db.execute('PRAGMA user_version = 3');
+          version = 3;
+        }
+        if (version < 4) {
+          _migrateToVersion4();
+          db.execute('PRAGMA user_version = 4');
         }
       });
       _db!.execute('PRAGMA journal_mode = WAL');
@@ -316,6 +321,26 @@ class DmcDatabase {
               AND pre_hash IS NULL AND pre_mode IS NULL))
       )
     ''');
+  }
+
+  /// Agent-turn context for checkpoints begun by agent hooks. All columns are
+  /// nullable so existing checkpoints keep their meaning.
+  void _migrateToVersion4() {
+    final existing = {
+      for (final row in _db!.select('PRAGMA table_info(checkpoints)'))
+        row['name'] as String,
+    };
+    for (final column in [
+      'agent TEXT CHECK(agent IS NULL OR length(agent) > 0)',
+      'agent_session_id TEXT',
+      'agent_turn_id TEXT',
+      'agent_transcript_path TEXT',
+      'agent_transcript_bytes INTEGER CHECK(agent_transcript_bytes IS NULL OR agent_transcript_bytes >= 0)',
+      'agent_transcript_sha256 TEXT',
+    ]) {
+      if (existing.contains(column.split(' ').first)) continue;
+      _db!.execute('ALTER TABLE checkpoints ADD COLUMN $column');
+    }
   }
 
   /// Close the database connection
