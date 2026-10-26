@@ -27,6 +27,37 @@ CheckpointChangeKind? checkpointChangeKindFromText(String? value) =>
         ),
       );
 
+/// Which coding-agent turn a checkpoint brackets. Recorded by agent hooks;
+/// null for manual and Haven checkpoints.
+class CheckpointAgentContext {
+  final String agent;
+  final String? sessionId;
+  final String? turnId;
+  final String? transcriptPath;
+
+  /// Transcript size and SHA-256 of the bytes read when the checkpoint closed.
+  final int? transcriptBytes;
+  final String? transcriptSha256;
+
+  const CheckpointAgentContext({
+    required this.agent,
+    this.sessionId,
+    this.turnId,
+    this.transcriptPath,
+    this.transcriptBytes,
+    this.transcriptSha256,
+  });
+
+  Map<String, Object?> toJson() => {
+    'name': agent,
+    'sessionId': sessionId,
+    'turnId': turnId,
+    'transcriptPath': transcriptPath,
+    'transcriptBytes': transcriptBytes,
+    'transcriptSha256': transcriptSha256,
+  };
+}
+
 class CheckpointRecord {
   final String id;
   final String? label;
@@ -39,6 +70,7 @@ class CheckpointRecord {
   final String policyFingerprint;
   final int fatalErrorCount;
   final int exclusionCount;
+  final CheckpointAgentContext? agent;
 
   const CheckpointRecord({
     required this.id,
@@ -52,6 +84,7 @@ class CheckpointRecord {
     required this.policyFingerprint,
     required this.fatalErrorCount,
     required this.exclusionCount,
+    this.agent,
   });
 
   Map<String, Object?> toJson() => {
@@ -66,6 +99,7 @@ class CheckpointRecord {
     'policyFingerprint': policyFingerprint,
     'fatalErrorCount': fatalErrorCount,
     'exclusionCount': exclusionCount,
+    'agent': agent?.toJson(),
   };
 }
 

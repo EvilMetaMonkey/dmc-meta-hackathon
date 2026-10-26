@@ -1,3 +1,11 @@
+## Unreleased — Meta AI Developer Hackathon 2026
+
+- Add `dmc agent-hook <muse-code|claude-code> <event>`: a UserPromptSubmit hook begins a checkpoint labelled with the prompt's first line, and Stop, StopFailure, SessionEnd (and Muse Code Interrupt) close it, but only when the same agent and session own it. A missed Stop is closed by the next prompt; a foreign active checkpoint is left alone with a stderr warning. The command always exits 0, prints nothing on stdout, retries a busy workspace lock for up to 5 seconds, and falls back to the session environment when stdin is empty or invalid.
+- Add `dmc hooks install|uninstall|status --agent <agent> [--scope project|local|user] [--apply] [--dmc-command <command>]`. It previews the exact JSON change by default, merges idempotently, and removes only exact dmc entries.
+- Add schema-version 4: nullable agent-turn context per checkpoint (agent, session, turn, transcript path, and transcript size/SHA-256 at close). Checkpoint JSON gains an additive `agent` object within machine schema 1; `checkpoint show`, `checkpoint list` and `status` print it.
+- Add `CheckpointService.closeActive`, which checks ownership of the active checkpoint under the same workspace lock as the close.
+- Document the verified Claude Code 2.1.310 hook surface and the researched, not yet verified, Muse Code surface in `docs/AGENT-HOOKS.md`.
+
 ## 1.1.0-dev.5.1 — Unreleased
 
 - Add `checkpoint recover OP --resume|--rollback --preview` and advertise `operationRecoveryPreview` under machine schema 1.

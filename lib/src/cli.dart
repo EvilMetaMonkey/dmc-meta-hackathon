@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'agent_hooks.dart';
 import 'checkpoint_service.dart';
 import 'checkpoint_restore_service.dart';
 import 'daemon.dart';
 import 'doctor.dart';
 import 'diff.dart';
 import 'gc.dart';
+import 'hook_installer.dart';
 import 'init.dart';
 import 'log.dart';
 import 'marks.dart';
@@ -156,6 +158,23 @@ Future<int> _runMarksCommand() async {
 
 Future<int> _runGcCommand(ArgResults command) {
   return runGc(dryRun: command['dry-run'] as bool? ?? false);
+}
+
+Future<int> _runHooksCommand(ArgResults command) {
+  final subcommand = command.command;
+  if (subcommand == null || subcommand.rest.isNotEmpty) {
+    print(
+      'Usage: dmc hooks <install|uninstall|status> --agent <muse-code|claude-code> [--scope project|local|user] [--apply] [--dmc-command <command>]',
+    );
+    return Future.value(2);
+  }
+  return runHooksCommand(
+    action: subcommand.name!,
+    agentName: subcommand['agent'] as String?,
+    scopeName: subcommand['scope'] as String?,
+    apply: subcommand.options.contains('apply') && subcommand['apply'] as bool,
+    dmcCommand: subcommand['dmc-command'] as String?,
+  );
 }
 
 Future<int> _runSnapCommand() async {
@@ -556,6 +575,11 @@ Future<int> _runDiffCommand(ArgResults command) async {
 
 /// Parse command-line arguments and execute the appropriate command
 Future<int> runCli(List<String> args) async {
+  // Agent hooks bypass normal parsing: they must exit 0 with empty stdout
+  // even for arguments this version does not understand.
+  if (args.isNotEmpty && args.first == 'agent-hook') {
+    return runAgentHookCommand(args.sublist(1));
+  }
   try {
     return await _runCli(args);
   } on FormatException catch (e) {
@@ -696,6 +720,32 @@ Future<int> _runCli(List<String> args) async {
       help: 'Require a supported machine schema version',
     );
   }
+  final hooksCommand = parser.addCommand('hooks');
+  for (final name in ['install', 'uninstall', 'status']) {
+    final hooksSubcommand = hooksCommand.addCommand(name);
+    hooksSubcommand.addOption(
+      'agent',
+      allowed: ['muse-code', 'claude-code'],
+      help: 'Agent whose hook configuration to change',
+    );
+    hooksSubcommand.addOption(
+      'scope',
+      allowed: ['project', 'local', 'user'],
+      help:
+          'Config file to use (default: local for claude-code, user for muse-code)',
+    );
+    hooksSubcommand.addOption(
+      'dmc-command',
+      help: 'Shell command that runs dmc (default: this executable)',
+    );
+    if (name != 'status') {
+      hooksSubcommand.addFlag(
+        'apply',
+        negatable: false,
+        help: 'Write the change (default: preview only)',
+      );
+    }
+  }
   final gcCommand = parser.addCommand('gc');
   gcCommand.addFlag('dry-run', negatable: false, help: 'Preview cleanup only');
   parser.addCommand('mark');
@@ -780,6 +830,12 @@ Future<int> _runCli(List<String> args) async {
       '  checkpoint recover <operation-id> (--resume|--rollback) [--preview] [--json]',
     );
     print(
+      '  agent-hook <muse-code|claude-code> <event>  Checkpoint an agent turn (called by agent hooks)',
+    );
+    print(
+      '  hooks install|uninstall|status --agent <agent> [--scope <scope>] [--apply]  Manage agent hooks',
+    );
+    print(
       '  gc [--dry-run]       Prune expired snapshots using retention config',
     );
     print('  task start <name>    Start assigning snapshots to a task');
@@ -842,6 +898,8 @@ Future<int> _runCli(List<String> args) async {
       );
     case 'checkpoint':
       return _runCheckpointCommand(command);
+    case 'hooks':
+      return _runHooksCommand(command);
     case 'gc':
       return _runGcCommand(command);
     case 'status':

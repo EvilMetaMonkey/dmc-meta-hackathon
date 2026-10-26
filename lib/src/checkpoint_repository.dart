@@ -42,15 +42,45 @@ class CheckpointRepository {
     required String source,
     required int createdAt,
     required String policyFingerprint,
+    CheckpointAgentContext? agent,
   }) {
     database.db.execute(
       '''
       INSERT INTO checkpoints
         (id, label, source, status, manifest_version, created_at,
-         policy_fingerprint, fatal_error_count, exclusion_count)
-      VALUES (?, ?, ?, 'creating', 1, ?, ?, 0, 0)
+         policy_fingerprint, fatal_error_count, exclusion_count,
+         agent, agent_session_id, agent_turn_id, agent_transcript_path)
+      VALUES (?, ?, ?, 'creating', 1, ?, ?, 0, 0, ?, ?, ?, ?)
       ''',
-      [id, label, source, createdAt, policyFingerprint],
+      [
+        id,
+        label,
+        source,
+        createdAt,
+        policyFingerprint,
+        agent?.agent,
+        agent?.sessionId,
+        agent?.turnId,
+        agent?.transcriptPath,
+      ],
+    );
+  }
+
+  /// Record the agent transcript observed at close. A null [bytes] or
+  /// [sha256] means the transcript could not be read.
+  void setAgentTranscript(
+    String id, {
+    required String? path,
+    required int? bytes,
+    required String? sha256,
+  }) {
+    database.db.execute(
+      '''
+      UPDATE checkpoints SET agent_transcript_path = ?,
+        agent_transcript_bytes = ?, agent_transcript_sha256 = ?
+      WHERE id = ? AND agent IS NOT NULL
+      ''',
+      [path, bytes, sha256, id],
     );
   }
 
@@ -279,6 +309,16 @@ class CheckpointRepository {
     policyFingerprint: row['policy_fingerprint'] as String,
     fatalErrorCount: row['fatal_error_count'] as int,
     exclusionCount: row['exclusion_count'] as int,
+    agent: row['agent'] == null
+        ? null
+        : CheckpointAgentContext(
+            agent: row['agent'] as String,
+            sessionId: row['agent_session_id'] as String?,
+            turnId: row['agent_turn_id'] as String?,
+            transcriptPath: row['agent_transcript_path'] as String?,
+            transcriptBytes: row['agent_transcript_bytes'] as int?,
+            transcriptSha256: row['agent_transcript_sha256'] as String?,
+          ),
   );
 
   CheckpointFileRecord _file(dynamic row) => CheckpointFileRecord(

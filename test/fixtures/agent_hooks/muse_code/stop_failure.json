@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "StopFailure",
+  "session_id": "22222222-3333-4444-8555-666666666666",
+  "cwd": "/home/dev/project",
+  "transcript_path": null,
+  "model": "muse-spark-1.3",
+  "permission_mode": "default",
+  "turn_id": "turn-0001"
+}

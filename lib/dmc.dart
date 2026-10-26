@@ -1,4 +1,5 @@
 // Re-export public API
+export 'src/agent_hooks.dart';
 export 'src/config.dart';
 export 'src/checkpoint_models.dart';
 export 'src/checkpoint_operation_models.dart';
@@ -13,6 +14,7 @@ export 'src/cli.dart';
 export 'src/database.dart';
 export 'src/diff.dart';
 export 'src/gc.dart';
+export 'src/hook_installer.dart';
 export 'src/machine_output.dart';
 export 'src/status.dart';
 export 'src/ignore.dart';

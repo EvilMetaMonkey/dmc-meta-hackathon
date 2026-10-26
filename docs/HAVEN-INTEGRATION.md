@@ -52,7 +52,7 @@ All fields listed here are part of machine schema 1. Additive fields may appear 
 | `checkpoint recover --preview` | On a valid pending operation: `preview`, `applied`, `canRecover`, `mode`, `operationId`, `checkpointId`, `operation`, `actions`, `conflicts` |
 | `checkpoint release` | `checkpoint`, `issues` |
 
-A checkpoint summary includes `id`, nullable `label`, `source`, `status`, `manifestVersion`, millisecond timestamps, `policyFingerprint`, `protectedFileCount`, `changedFileCount`, `exclusionCount`, and `fatalErrorCount`. Status values are `creating`, `open`, `closing`, `closed`, `invalid`, and `released`.
+A checkpoint summary includes `id`, nullable `label`, `source`, `status`, `manifestVersion`, millisecond timestamps, `policyFingerprint`, `protectedFileCount`, `changedFileCount`, `exclusionCount`, `fatalErrorCount`, and `agent`. `agent` is additive and null unless an agent hook began the checkpoint; otherwise it holds `name`, `sessionId`, `turnId`, `transcriptPath`, `transcriptBytes` and `transcriptSha256` (the last two set at close). See `docs/AGENT-HOOKS.md`. Status values are `creating`, `open`, `closing`, `closed`, `invalid`, and `released`.
 
 File entries contain a relative `path`, `before` and nullable `after` states, and a nullable `change`. State objects contain `kind`, nullable `snapshotId`, nullable SHA-256 `hash`, and nullable POSIX `mode`. Kind values are `file` and `absent`; change values are `unchanged`, `modified`, `created`, and `deleted`.
 
