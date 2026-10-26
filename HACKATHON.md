@@ -3,7 +3,7 @@
 This repository is Mike Hood's ([@EvilMetaMonkey](https://github.com/EvilMetaMonkey)) entry in the
 **Meta AI Developer Hackathon (October–November 2026), indie developer track**.
 
-The entry adds a recovery layer for AI coding agents, powered by Meta's Muse Spark models, on top of
+The entry adds a recovery loop for AI coding agents, powered by Meta's Muse models, on top of
 [dmc](https://github.com/EvilMetaMonkey/dmc). dmc is an existing open-source project by the same
 author. The hackathon proposal said it would build on dmc, and the proposal was accepted.
 
@@ -50,24 +50,59 @@ Or compare on GitHub:
 
 ### Planned scope
 
-This list is the plan, not a record of finished work. The commit history is the record.
+This list is the plan, not a record of finished work. The commit history is the record. The full
+plan is the "dmc Hackathon Feature Spec": <https://claude.ai/artifact/P8wKzevNHctpaCvdpw89NY>.
 
-- Plain-English checkpoint summaries from Muse Spark (intent, outcome, friction, open items)
-- Natural-language restore through Doc ("take me back to before it touched auth"), always with a
-  diff preview and a confirmation step
-- Chat rollback that forks the agent's session instead of changing it, with an approved "lesson
-  note" so the resumed agent doesn't repeat the mistake
-- `dmc why file:line` to trace a line back to the burst, prompt, agent and session that changed it
-- Doc as both a terminal UI and a local web page, with optional "Hey Doc" voice input
-- Parity work: selective restore, secret redaction, `status`, `doctor`, `clean`, clean `disable`,
-  `--json` output, and hooks for Claude Code, Codex CLI and Aider
+The headline is one recovery loop:
+
+1. **Find it.** Time-travel bisect runs your tests across agent-turn checkpoints to find the turn
+   where things broke, without touching your working copy.
+2. **Fix it.** Parallel timelines: from the last good checkpoint, three Muse Code agents try three
+   different approaches in separate worktrees. You see the test results side by side and pick one.
+   The other two are archived, never deleted.
+3. **Remember it.** The lesson library saves what went wrong as an approved lesson and offers it to
+   any agent that later works on the same files.
+
+Supporting features:
+
+- "Hey Doc" push-to-talk voice (no wake word) and a plain CLI. The terminal UI is set aside for
+  the hackathon.
+- Natural-language restore ("take me back to before it touched auth"), always with a diff preview
+  and a confirmation step
+- Agent-turn checkpoints from hooks for Muse Code and Claude Code
+- Plain-English per-checkpoint summaries, and `doc --local` to run every model step on the
+  user's machine
+- Parity work: secret redaction, agent info in `status`, clean `disable`, and a worktree check
+
+If time allows: chat rollback, Codex CLI and Aider support, selective `--path` restore, and a local
+web page.
+
+### Meta models
+
+| Model or tool | Job |
+|---|---|
+| Muse Code | The demo agent, and the agent in each parallel timeline |
+| Muse Spark 1.3 | Natural-language restore, bisect explanations, lesson notes |
+| Muse Wonder | Plans the three timelines and judges the results |
+| Muse Glimmer | Runs locally: per-checkpoint summaries, lesson matching, and `doc --local` |
+| Muse Voice Transcribe | "Hey Doc" push-to-talk |
+
+Theme: **Push the Frontier**.
+
+### How the build is organized
+
+- **dmc, the engine:** stays deterministic, with no models inside it. Hackathon changes are small
+  and deterministic, such as a new `checkpoint export` command.
+- **Doc, the companion:** a separate program in this repository that runs every AI feature. It
+  talks to dmc only through dmc's versioned JSON interface (machine schema 1), and every file change
+  goes through dmc's preview-first, journaled restore. The AI never touches your files directly.
 
 ### Design rules that still apply
 
-- **Awareness over agency.** Doc suggests; the user decides. Nothing is restored, rolled back or
-  sent to a model without the user asking.
-- **Secrets are redacted** before anything is sent to Muse Spark.
-- **Local-first.** History stays on the user's machine.
+- **Awareness over agency.** Doc suggests; the user decides. Nothing is restored, rolled back,
+  forked into timelines or sent to a model without the user asking.
+- **Secrets are redacted** before anything is sent to a hosted model.
+- **Local-first.** History stays on the user's machine, and `doc --local` keeps model work there too.
 
 ## License
 
