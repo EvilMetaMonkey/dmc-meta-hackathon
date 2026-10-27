@@ -27,3 +27,12 @@ jobs:
         run: dart run tool/smoke_bundle.dart build/ci-dmc/bundle/bin/dmc
       - if: runner.os == 'Windows'
         run: dart run tool/smoke_bundle.dart build/ci-dmc/bundle/bin/dmc.exe
+      # Doc (doc/) is a separate package; its tests drive the bundle built above.
+      - run: dart pub get --enforce-lockfile
+        working-directory: doc
+      - run: dart analyze --fatal-infos
+        working-directory: doc
+      - run: dart test --concurrency=1
+        working-directory: doc
+        env:
+          DMC_TEST_BIN: ${{ github.workspace }}/build/ci-dmc/bundle/bin/${{ runner.os == 'Windows' && 'dmc.exe' || 'dmc' }}
