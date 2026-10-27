@@ -129,6 +129,28 @@ String? findDmcWorkspace(String start) {
   }
 }
 
+/// The work tree that owns [start] when it is not the dmc workspace [root]:
+/// the nearest `.git` marker (directory or file) at or above [start] sits
+/// below [root]. That is a linked worktree, a nested repository or a
+/// submodule, and its files belong to a different history. Uses marker
+/// positions only; no git process runs in the hook.
+String? foreignWorkTree(String start, String root) {
+  final normalizedRoot = p.normalize(p.absolute(root));
+  var current = p.normalize(p.absolute(start));
+  while (p.isWithin(normalizedRoot, current)) {
+    final type = FileSystemEntity.typeSync(
+      p.join(current, '.git'),
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.directory ||
+        type == FileSystemEntityType.file) {
+      return current;
+    }
+    current = p.dirname(current);
+  }
+  return null;
+}
+
 final _safeSessionId = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]*$');
 
 /// Locate Muse Code's `session.jsonl` for [sessionId] under
@@ -224,6 +246,13 @@ class AgentHookRunner {
         : currentDirectory();
     final root = findDmcWorkspace(start);
     if (root == null) return;
+    final otherWorkTree = foreignWorkTree(start, root);
+    if (otherWorkTree != null) {
+      _warn(
+        '$event: $start belongs to another Git work tree ($otherWorkTree), not to the dmc workspace $root. Nothing was recorded. Run "dmc init" in that work tree to give it its own vault.',
+      );
+      return;
+    }
 
     final service = serviceFactory(root);
     var transcriptPath = payload.transcriptPath;
