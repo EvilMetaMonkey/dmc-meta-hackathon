@@ -128,7 +128,8 @@ Last updated: 2026-10-27 by Claude (export and policy-drift session)
   bytes (1.4 MB on disk), median 40 ms over 5 runs, identical to the working copy minus ignored
   paths.
 - Gates for this branch: analyzer clean, `dart test --concurrency=1` 218 passed, Haven contract
-  tests 3 passed unchanged.
+  tests 3 passed unchanged. PR #4 CI passed on ubuntu, macOS, macOS Intel and Windows in both the
+  push and pull_request runs for `c7bb435` (and the push run for `b0b8040`).
 
 ## In progress
 
