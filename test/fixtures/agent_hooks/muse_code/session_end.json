@@ -1,9 +1,10 @@
 {
   "hook_event_name": "SessionEnd",
+  "reason": "other",
   "session_id": "22222222-3333-4444-8555-666666666666",
-  "cwd": "/home/dev/project",
+  "cwd": "/Users/dev/project",
   "transcript_path": null,
-  "model": "muse-spark-1.3",
+  "model": "muse-spark-1.3-contributor",
   "permission_mode": "default",
-  "reason": "exit"
+  "model_provider": "meta"
 }

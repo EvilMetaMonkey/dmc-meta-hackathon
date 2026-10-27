@@ -5,6 +5,10 @@
 - Add schema-version 4: nullable agent-turn context per checkpoint (agent, session, turn, transcript path, and transcript size/SHA-256 at close). Checkpoint JSON gains an additive `agent` object within machine schema 1; `checkpoint show`, `checkpoint list` and `status` print it.
 - Add `CheckpointService.closeActive`, which checks ownership of the active checkpoint under the same workspace lock as the close.
 - Document the verified Claude Code 2.1.310 hook surface and the researched, not yet verified, Muse Code surface in `docs/AGENT-HOOKS.md`.
+- Verify the Muse Code 1.4.13 hook surface on macOS: both `~/.config/muse/settings.json` and a trusted workspace's `.muse/hooks.json` fire; StopFailure and Interrupt payloads were captured; `transcript_path` is always null; `HOME` is passed to hooks. The Muse fixtures are now scrubbed captures, and the default Muse scope stays `user` because project hooks are skipped silently in untrusted workspaces.
+- Fix `dmc hooks uninstall` to restore the config file's original bytes: it drops a `hooks` object it emptied, keeps the file's layout and final newline, and deletes a file it left empty.
+- Fix agent-hook close events so that a turn ID must match the active checkpoint's turn. A late async Muse Interrupt no longer closes the next turn's checkpoint.
+- Fix an intermittent `dart test` failure: agent hook fixtures now resolve from the package root rather than the cwd.
 
 ## 1.1.0-dev.5.1 — Unreleased
 

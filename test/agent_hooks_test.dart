@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
 import 'package:dmc/dmc.dart';
@@ -10,6 +11,18 @@ import 'package:test/test.dart';
 
 const museSession = '22222222-3333-4444-8555-666666666666';
 const claudeSession = '11111111-2222-4333-8444-555555555555';
+const museTurn = '33333333-4444-7555-8666-777777777777';
+
+/// The package root, resolved from `package:dmc` rather than the process cwd:
+/// `dart test` runs files in parallel isolates of one process, and other test
+/// files change `Directory.current`.
+final String packageRoot = p.dirname(
+  p.dirname(
+    Isolate.resolvePackageUriSync(
+      Uri.parse('package:dmc/dmc.dart'),
+    )!.toFilePath(),
+  ),
+);
 
 /// A fixture payload with `cwd` (and optionally other fields) replaced.
 String fixture(
@@ -19,7 +32,14 @@ String fixture(
   Map<String, Object?> overrides = const {},
 }) {
   final file = File(
-    p.join('test', 'fixtures', 'agent_hooks', agentDirectory, '$name.json'),
+    p.join(
+      packageRoot,
+      'test',
+      'fixtures',
+      'agent_hooks',
+      agentDirectory,
+      '$name.json',
+    ),
   );
   final payload = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
   return jsonEncode({...payload, 'cwd': cwd, ...overrides});
@@ -109,9 +129,9 @@ void main() {
     expect(records, hasLength(1));
     expect(records.single.status, CheckpointStatus.open);
     expect(records.single.source, 'muse-code');
-    expect(records.single.label, 'Refactor the auth module');
+    expect(records.single.label, 'reply with the word ok');
     expect(records.single.agent!.sessionId, museSession);
-    expect(records.single.agent!.turnId, 'turn-0001');
+    expect(records.single.agent!.turnId, museTurn);
     expect(records.single.agent!.transcriptPath, transcript.path);
     expect(records.single.agent!.transcriptBytes, isNull);
 
@@ -267,6 +287,42 @@ void main() {
       stdinText: fixture('muse_code', 'interrupt', cwd: root.path),
     );
     expect(checkpoints().single.status, CheckpointStatus.closed);
+  });
+
+  test('a late async Interrupt does not close the next turn', () async {
+    await hook(
+      'muse-code',
+      'UserPromptSubmit',
+      stdinText: fixture('muse_code', 'user_prompt_submit', cwd: root.path),
+    );
+    await hook(
+      'muse-code',
+      'UserPromptSubmit',
+      stdinText: fixture(
+        'muse_code',
+        'user_prompt_submit',
+        cwd: root.path,
+        overrides: {'prompt': 'Second turn', 'turn_id': 'turn-0002'},
+      ),
+    );
+    await hook(
+      'muse-code',
+      'Interrupt',
+      stdinText: fixture('muse_code', 'interrupt', cwd: root.path),
+    );
+    expect(checkpoints().last.status, CheckpointStatus.open);
+    await hook(
+      'muse-code',
+      'Stop',
+      stdinText: fixture(
+        'muse_code',
+        'stop',
+        cwd: root.path,
+        overrides: {'turn_id': 'turn-0002'},
+      ),
+    );
+    expect(checkpoints().last.status, CheckpointStatus.closed);
+    expect(warnings, hasLength(1));
   });
 
   test('a foreign active checkpoint is left alone', () async {

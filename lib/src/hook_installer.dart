@@ -8,9 +8,10 @@ import 'agent_hooks.dart';
 /// Where an agent's hook configuration is written.
 enum HookScope { project, local, user }
 
-/// The scope used when `--scope` is omitted. Claude Code's project-local
-/// settings were verified by probe; for Muse Code only the user settings file
-/// was verified (by a third-party spike). See docs/AGENT-HOOKS.md.
+/// The scope used when `--scope` is omitted. Both were verified by probe.
+/// Muse Code 1.4.13 also runs `.muse/hooks.json`, but only in a trusted
+/// workspace and silently skips it otherwise, so the user settings file,
+/// which always runs, is the default. See docs/AGENT-HOOKS.md.
 HookScope defaultHookScope(HookAgent agent) => switch (agent) {
   HookAgent.claudeCode => HookScope.local,
   HookAgent.museCode => HookScope.user,
@@ -170,8 +171,8 @@ HookConfigPlan planHookInstall(
 }
 
 /// Remove only handlers whose command exactly matches what dmc writes for
-/// that event. Groups and event lists emptied by the removal are dropped;
-/// everything else is left untouched.
+/// that event. Groups, event lists and a `hooks` object emptied by the
+/// removal are dropped; everything else is left untouched.
 HookConfigPlan planHookUninstall(
   Map<String, Object?> config,
   HookAgent agent,
@@ -204,6 +205,8 @@ HookConfigPlan planHookUninstall(
     removed.add(event);
     if (groups.isEmpty) hooks.remove(event);
   }
+  // Install adds the "hooks" object when it is missing, so drop it again.
+  if (removed.isNotEmpty && hooks.isEmpty) after.remove('hooks');
   return HookConfigPlan(after, const [], removed);
 }
 
@@ -249,8 +252,23 @@ List<String> otherDmcHookCommands(
   ];
 }
 
-String encodeHookConfig(Map<String, Object?> config) =>
-    '${const JsonEncoder.withIndent('  ').convert(config)}\n';
+/// Encode [config] in the layout of [original] (single-line or its indent,
+/// and whether it ends with a newline), so that uninstall restores a file
+/// written by dmc or by the agent to its exact bytes. A new file gets a
+/// two-space indent and a trailing newline.
+String encodeHookConfig(Map<String, Object?> config, {String original = ''}) {
+  final body = original.trimRight();
+  final String text;
+  if (body.isNotEmpty && !body.contains('\n')) {
+    text = jsonEncode(config);
+  } else {
+    final indent =
+        RegExp(r'^([ \t]+)"', multiLine: true).firstMatch(body)?.group(1) ??
+        '  ';
+    text = JsonEncoder.withIndent(indent).convert(config);
+  }
+  return original.isEmpty || original.endsWith('\n') ? '$text\n' : text;
+}
 
 /// A line diff of [before] and [after], with `-`, `+` and ` ` prefixes.
 List<String> lineDiff(String before, String after) {
@@ -433,14 +451,23 @@ Future<int> runHooksCommand({
   for (final event in plan.removed) {
     print('- $event: ${dmcHookCommand(command, agent, event)}');
   }
-  final afterText = encodeHookConfig(plan.after);
+  // A config left empty by uninstall is one dmc created: remove the file.
+  final remove = action == 'uninstall' && plan.after.isEmpty;
+  final afterText = remove
+      ? ''
+      : encodeHookConfig(plan.after, original: beforeText);
   print('--- $configPath');
-  print('+++ $configPath');
+  print('+++ ${remove ? '/dev/null' : configPath}');
   for (final line in lineDiff(beforeText, afterText)) {
     print(line);
   }
   if (!apply) {
     print('[DMC] Preview only. Run again with --apply to write this change.');
+    return 0;
+  }
+  if (remove) {
+    file.deleteSync();
+    print('[DMC] Removed $configPath, which held only dmc hooks.');
     return 0;
   }
   file.parent.createSync(recursive: true);
@@ -453,9 +480,9 @@ Future<int> runHooksCommand({
 
 List<String> _scopeNotes(HookAgent agent, HookScope scope) => [
   if (agent == HookAgent.museCode && scope == HookScope.project)
-    'Muse Code runs project hooks only after the folder is trusted. This path and its file shape are unverified; see docs/AGENT-HOOKS.md.',
+    'Muse Code runs project hooks only in a trusted workspace and silently skips them otherwise. Trust the folder in interactive muse, or pass --trust-workspace to muse exec.',
   if (agent == HookAgent.museCode && scope == HookScope.user)
-    'Verified by a third-party spike only, not on this machine; see docs/AGENT-HOOKS.md.',
+    'These hooks run in every Muse Code session; they do nothing outside a dmc workspace.',
   if (agent == HookAgent.claudeCode && scope == HookScope.project)
     '.claude/settings.json is usually committed, and the dmc path is specific to this machine. Prefer --scope local.',
 ];

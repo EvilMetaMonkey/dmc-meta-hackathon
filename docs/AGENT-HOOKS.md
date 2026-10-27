@@ -7,18 +7,18 @@ builds on these facts in `dmc agent-hook` and `dmc hooks` (see "Using it" at the
 Status key: **verified** = observed on a real install; **researched** = from vendor docs or a
 third-party spike, not observed here; **assumed** = a design choice made without evidence.
 
-## Verification run
+## Verification runs
 
-| | |
-|---|---|
-| Date | 2026-10-26 |
-| Machine | Linux x86_64 cloud container (not the planned Mac), running as root |
-| Claude Code | 2.1.310, verified with a probe hook |
-| Muse Code | **not installed**. `muse --version` → `command not found`. The Muse probe was skipped, and `~/.config/muse/settings.json` was never touched. `dev.meta.ai` is blocked by this container's network policy, so the docs could not be re-read either. |
+| | Claude Code | Muse Code |
+|---|---|---|
+| Date | 2026-10-26 | 2026-10-26 |
+| Machine | Linux x86_64 cloud container, as root | macOS 27.0 (arm64), Mike's Mac, as a normal user |
+| Version | 2.1.310 (re-run end to end on 2.1.311 on the Mac) | 1.4.13 (`1.4.13-R6996.1`) |
 
 Probe method: a throwaway git repository under `/tmp` with a Python probe hook that appended
-`{event, argv, cwd, stdin, selected env}` to a log for each event. Scrubbed payloads are in
-`test/fixtures/agent_hooks/`.
+`{event, argv, cwd, stdin, env}` to a log for each event. Scrubbed payloads are in
+`test/fixtures/agent_hooks/`. For Muse, `~/.config/muse/settings.json` and `trust.json` were backed
+up first and restored byte-for-byte afterwards (checked with `shasum -a 256`).
 
 ## Claude Code 2.1.310 (verified)
 
@@ -63,62 +63,139 @@ Stdin payload fields (all snake_case):
 End to end: with hooks written by `dmc hooks install --agent claude-code --apply` (local scope,
 compiled bundle), a real `claude -p` turn that wrote `greeting.txt` produced one closed checkpoint
 labelled with the prompt, with `greeting.txt: created`, the session ID, the `prompt_id` as turn
-ID, and the transcript's size and SHA-256 at Stop.
+ID, and the transcript's size and SHA-256 at Stop. Repeated on macOS with Claude Code 2.1.311 (a
+turn that created `hello.txt`): same result, and `dmc hooks uninstall --agent claude-code --apply`
+removed the `settings.local.json` it had created (an empty `.claude/` directory is left).
 
 Not verified: whether `Stop` fires when a turn is cancelled with Esc. With no `Interrupt` event,
 dmc treats the next `UserPromptSubmit` from the same session as the close for a cancelled turn
 (see "Missed Stop" below).
 
-## Muse Code 1.4.x (researched, unverified on this machine)
+## Muse Code 1.4.13 (verified on macOS)
 
-Sources: dev.meta.ai/docs/muse-code/extending, /interactive and /changelog (1.4.13), and the
-third-party spike pj-tmt/tmt#2936 (1.4.7). None of it could be re-checked here.
+Research sources, now checked against a real install: dev.meta.ai/docs/muse-code/extending,
+/interactive and /changelog (1.4.13), and the third-party spike pj-tmt/tmt#2936 (1.4.7). Each
+fact below is marked **verified 1.4.13** (observed by the probe) or **researched** (still
+unverified).
 
-- **Events:** SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse,
-  PostToolUseFailure, PostToolBatch, PreLLMCall, PostLLMCall, PreCompact, PostCompact,
-  SubagentStart, SubagentStop, Notification, Stop, StopFailure, SessionEnd, and Interrupt (Esc or
-  cancel; the handler must be `async: true`). Stop does not fire on cancelled turns.
-- **Config:** the docs name project `<root>/.muse/hooks.json` (runs only once the folder is
-  trusted) and user settings. The spike verified only `~/.config/muse/settings.json` → `"hooks"`,
-  in the Claude-style shape above. Event names are PascalCase only. Handler fields: `command`,
-  `timeout`, `statusMessage`, `async`, `if`. The top-level shape of `.muse/hooks.json` is not
-  documented in the research; dmc **assumes** it matches settings (`{"hooks":{…}}`).
-- **Stdin (snake_case):** `hook_event_name`, `session_id`, `cwd`, `transcript_path` (may be
-  null), `model`, `permission_mode`; UserPromptSubmit adds `prompt`, `turn_id`; Stop adds
-  `turn_id`, `last_assistant_message`, `stop_hook_active`; SessionEnd adds `reason`. The
-  StopFailure and Interrupt field sets are not documented in the research.
-- **Environment:** runs as `$SHELL -c '<command>'` in the session cwd with a cleared environment
-  plus a small allowlist. `MUSE_SESSION_ID` and `MUSE_THREAD_ID` hold the session UUID. `PATH`
-  may not include dmc, so the installer writes an absolute path. A shell startup file can eat
-  stdin (seen with fish), which is why dmc falls back to `MUSE_SESSION_ID`.
-- **Transcript:** `~/.local/share/muse/sessions/YYYY/MM/DD/<session-id>/session.jsonl` (JSONL
-  envelopes; subagents under `subagent/<id>/`). Not a stability promise.
-- **Resume:** `muse resume <uuid|name>`, or `muse resume --last` (TTY only). Never use
-  `muse exec --session-id <unknown>` to resume: it silently starts a new session.
-- **Hook output:** exit 2 can block the agent's turn, and unknown keys in hook output make the
-  hook fail. dmc always exits 0 and prints nothing on stdout.
+**Config paths (verified 1.4.13).** Both fire, with the same file shape: a top-level
+`{"hooks":{"<Event>":[{"matcher":"*","hooks":[{"type":"command","command":"…","timeout":10}]}]}}`.
 
-The Muse fixtures in `test/fixtures/agent_hooks/muse_code/` are synthetic, built from this list.
+- `~/.config/muse/settings.json` → `"hooks"` fires in `muse exec` and the TUI, in any workspace,
+  trusted or not.
+- Project `<root>/.muse/hooks.json` fires **only in a trusted workspace**. In an untrusted one,
+  `muse exec` printed `Agent delegation: auto unavailable: workspace is untrusted.` and skipped
+  the hooks without any warning. Two ways to trust:
+  - `muse exec … --trust-workspace` (or `--yolo`) trusts it for that run only and prints
+    `workspace trust: trusted source=run-flag`. Nothing is saved.
+  - The interactive TUI asks whether to trust the folder on first launch. Accepting adds
+    `"<canonical path>": {"decision": "trusted"}` under `"projects"` in
+    `~/.config/muse/trust.json`. The path is canonical: `/tmp/muse-probe` was saved as
+    `/private/tmp/muse-probe`.
+  - Not verified: whether trusting a parent folder (for example `~/Projects`) also covers the
+    folders inside it.
 
-### To verify on a machine with Muse Code
+**Events (verified 1.4.13 for the ones probed).** Sequences observed:
+
+- `muse exec` success: `SessionStart` → `UserPromptSubmit` → `Stop` → `SessionEnd`.
+- Unreachable endpoint (`muse exec … --base-url http://127.0.0.1:9`, four transport retries,
+  about 4 s): `SessionStart` → `UserPromptSubmit` → `StopFailure` (twice, see below) →
+  `SessionEnd`. `Stop` did not fire.
+- Interactive turn cancelled with Esc, then a second prompt: `SessionStart` →
+  `UserPromptSubmit` → `Interrupt` → `UserPromptSubmit` → `Stop` → `SessionEnd`. **Stop does not
+  fire for the cancelled turn**, and the Interrupt carries that turn's `turn_id`. The probe
+  registered Interrupt with `"async": true`, as the docs require.
+- The failed run fired a second `StopFailure` with a **different `session_id`** (whose
+  `turn_id` equals that session ID, and which has no `sessions/` folder), before the real
+  session's StopFailure. It looks like an internal helper session. dmc ignores it because the
+  session does not own the checkpoint.
+- An interactive launch that stopped at the login screen fired only `SessionEnd`, with
+  `"model":"unknown"` and no SessionStart.
+- The other researched events (PreToolUse, PostToolUse, PreLLMCall, …) were not probed.
+
+**Stdin payload (verified 1.4.13), snake_case:**
+
+| Event | Fields |
+|---|---|
+| all | `hook_event_name`, `session_id`, `cwd`, `transcript_path` (**always `null`** in every run), `model`, `permission_mode` (`default`), `model_provider` (`meta`; missing on Interrupt) |
+| SessionStart | + `source` (`startup`) |
+| UserPromptSubmit | + `prompt`, `turn_id` |
+| Stop | + `turn_id`, `stop_hook_active`, `last_assistant_message` |
+| StopFailure | + `turn_id`, `error` (`unknown` for a transport error), `last_assistant_message` (the error text) |
+| Interrupt | + `turn_id` (no `model_provider`) |
+| SessionEnd | + `reason` (`other`); no `turn_id` |
+
+`turn_id` is a UUIDv7 and is the same on a turn's UserPromptSubmit and its Stop, StopFailure or
+Interrupt. `model_provider` was not in the research. Interrupt and StopFailure are now
+documented here.
+
+**Environment (verified 1.4.13).** Hooks run in the session cwd with a **cleared environment**:
+a variable set in the shell that launched `muse` did not reach the hook. The hook received
+exactly `HOME`, `LANG`, `LOGNAME`, `MUSE_SESSION_ID`, `MUSE_THREAD_ID`, `OLDPWD`, `PATH`, `PWD`,
+`SHELL`, `SHLVL`, `TERM`, `TMPDIR`, `TRACEPARENT` (not on SessionEnd), `USER`, `_` and
+`__CF_USER_TEXT_ENCODING`. So:
+
+- **`HOME` is set**, so dmc's transcript fallback works. `XDG_DATA_HOME` is **not** passed
+  through. A user who moves Muse's data with it would get no transcript hash, if Muse honors it at
+  all (not verified).
+- `PATH` was the user's full login `PATH` (`$SHELL` is zsh here). The installer still writes an
+  absolute path.
+- `MUSE_SESSION_ID` and `MUSE_THREAD_ID` both equal `session_id`.
+- Researched, not verified: `$SHELL -c` as the runner, and a fish startup file eating stdin.
+
+**Transcript (verified 1.4.13 on macOS).** It lives at
+`~/.local/share/muse/sessions/YYYY/MM/DD/<session-id>/session.jsonl`, the same path as on Linux
+(not `~/Library/…`). The date is the **local** date: a session started at 20:17 CDT on Oct 26
+(01:17 UTC on Oct 27) went under `2026/10/26`. The file already exists at UserPromptSubmit. A
+`.msp-view-g6/<session-id>/` folder of binary indexes sits next to the date folders. Because
+`transcript_path` is always null, dmc always uses the fallback search, which looks in every date
+folder.
+
+**Researched, not verified:** resume (`muse resume <uuid|name>`, `muse resume --last`; never
+`muse exec --session-id <unknown>`, which silently starts a new session), hook output (exit 2 can
+block the turn; unknown output keys fail the hook), and the handler fields `statusMessage` and
+`if`.
+
+**Other observations:**
+
+- The interactive TUI asked to log in or enter an API key even though `muse exec` already ran
+  with the stored key. `muse usage` reports `No subscription allowance`.
+- An older `muse-bin-1.4.10` process from another session was running on the Mac during the
+  probe. `muse` on `PATH` is 1.4.13.
+
+End to end (verified 1.4.13): after `dmc hooks install --agent muse-code --apply` (user scope,
+compiled bundle), `muse exec "Create a file named hello.txt …" --disable-approval` in an untrusted
+`/tmp` repo produced one closed checkpoint with source `muse-code`, the session ID, the
+`turn_id`, the `session.jsonl` path with its size and SHA-256, and `hello.txt: created`.
+`dmc hooks uninstall --agent muse-code --apply` restored `~/.config/muse/settings.json` to its
+exact original bytes (same SHA-256).
+
+### To re-verify on a new Muse Code version
 
 1. `muse --version`.
 2. In a throwaway git repo, install a probe for SessionStart, UserPromptSubmit, Stop,
-   StopFailure, SessionEnd and Interrupt (`"async": true`) in `.muse/hooks.json` only, then run
-   `muse exec "reply with the word ok" --max-model-steps 1`. Then repeat with
+   StopFailure, SessionEnd and Interrupt (`"async": true`) in `.muse/hooks.json` only, and run
+   `muse exec "reply with the word ok" --max-model-steps 1 --trust-workspace`. Then repeat with
    `~/.config/muse/settings.json` only (back it up and restore it byte-for-byte afterwards).
-3. Record which file fired, the real payload fields (especially StopFailure and Interrupt), and
-   the env. Replace the synthetic fixtures with scrubbed captures, and change the installer's
-   default Muse scope if `project` turns out to work.
+3. For StopFailure, add `--base-url http://127.0.0.1:9`. For Interrupt, run `muse` and press Esc
+   partway through a long reply.
 
 ## Contradictions and surprises
 
 - The research gave `turn_id` as a common turn field. That is Muse-only: Claude Code 2.1.310
   sends `prompt_id` instead.
-- Claude Code does not clear the hook environment, unlike the researched Muse behavior.
+- Claude Code does not clear the hook environment. Muse Code does (verified 1.4.13).
 - Claude Code reports a `transcript_path` for a file that does not exist when the turn failed
   before anything was written. dmc records no size or hash when the file is missing.
-- The verification ran on Linux as root, not on the planned Mac.
+- Muse Code 1.4.13 sends `transcript_path: null` in every event, so the session-ID fallback is
+  the only way dmc finds the Muse transcript.
+- Muse's project `.muse/hooks.json` is skipped **silently** in an untrusted workspace, including
+  under `muse exec`. That is why the installer's Muse default stays `user`.
+- Muse Interrupt handlers are async, so an Interrupt can arrive after the next prompt has begun.
+  dmc closes only the checkpoint whose turn ID matches.
+- Muse sends `model_provider`, which the research did not list.
+- The first Claude Code probe ran on Linux as root. The Muse probe and both end-to-end runs ran
+  on the Mac as a normal user.
 
 ## Using it
 
@@ -131,7 +208,7 @@ The rest of this page describes what dmc builds on these facts.
 | Event | Action |
 |---|---|
 | UserPromptSubmit | `checkpoint begin --source <agent>`, labelled with the prompt's first line (≤ 100 characters) |
-| Stop, StopFailure, SessionEnd (both agents), Interrupt (Muse) | close the active checkpoint if this agent and session own it |
+| Stop, StopFailure, SessionEnd (both agents), Interrupt (Muse) | close the active checkpoint if this agent and session own it and, when the event has a turn ID, it is the same turn |
 | SessionStart and anything else | nothing |
 
 - **Workspace:** walk up from payload `cwd` (else the process cwd) to the nearest directory that
@@ -144,6 +221,9 @@ The rest of this page describes what dmc builds on these facts.
   left alone, the new checkpoint is skipped, and a warning goes to stderr.
 - **Ownership:** the active checkpoint is checked and closed under one workspace lock, so another
   dmc process cannot swap it in between.
+- **Turn match:** a close event with a turn ID (Muse `turn_id`, Claude Code `prompt_id`) leaves a
+  checkpoint from a different turn open. That way a late async Muse Interrupt cannot close the
+  next turn. SessionEnd has no turn ID and closes any turn in its session.
 - **Lock:** a busy workspace lock is retried for up to 5 seconds. Capture itself is not
   interruptible, so the hook timeout must cover a full workspace scan; the installer sets 60
   seconds.
@@ -152,8 +232,17 @@ The rest of this page describes what dmc builds on these facts.
 
 Agent context is stored per checkpoint (schema 4): `agent`, `sessionId`, `turnId`,
 `transcriptPath` and, at close, `transcriptBytes` and `transcriptSha256` of the transcript
-bytes read at that moment. For Muse, a missing `transcript_path` falls back to the session's
-`session.jsonl` found by session ID. It appears as an additive `agent` object (null for
+bytes read at that moment. For Muse, a missing `transcript_path` (always, in 1.4.13) falls back
+to the session's `session.jsonl`, found by session ID under `$XDG_DATA_HOME` or
+`$HOME/.local/share`.
+
+**Prompt delay (measured 2026-10-26, macOS arm64, compiled bundle):** `dmc agent-hook claude-code
+UserPromptSubmit`, with the captured fixture piped in, run against a `dmc init`'d clone of this
+repository (116 tracked files, 2.1 MB), took a **134 ms median** over 8 runs (165 ms on the first
+run). When it also had to close a turn left open by a missed Stop, it took about 294 ms. Stop took
+a 174 ms median. Process startup (`dmc --version`) is about 9 ms, so the workspace scan and the
+SQLite writes take most of the time. The clone had to have `website/.gitignore` moved into a
+root `.dmcignore` first; see STATUS.md, Broken. It appears as an additive `agent` object (null for
 non-agent checkpoints) in machine schema 1 output, and in `checkpoint show`, `checkpoint list`
 and `status`.
 
@@ -162,9 +251,13 @@ and `status`.
 | Agent | `project` | `local` | `user` | Default |
 |---|---|---|---|---|
 | claude-code | `<root>/.claude/settings.json` | `<root>/.claude/settings.local.json` | `~/.claude/settings.json` | `local` (verified) |
-| muse-code | `<root>/.muse/hooks.json` (assumed shape) | not supported | `~/.config/muse/settings.json` | `user` (spike-verified only) |
+| muse-code | `<root>/.muse/hooks.json` (verified 1.4.13; trusted workspaces only) | not supported | `~/.config/muse/settings.json` (verified 1.4.13) | `user` (always fires) |
 
 - `install` and `uninstall` preview the exact change and write only with `--apply`.
+- Uninstall restores the original bytes: it drops a `hooks` object it emptied, writes the file
+  in its original layout (single-line or its indent, and its final newline), and deletes a file
+  left empty, which is one dmc created. Verified on Muse's `settings.json` (same SHA-256 after
+  install and uninstall) and on a created `.claude/settings.local.json` (removed).
 - Entries call an absolute path to the running dmc executable. Under `dart run`, pass
   `--dmc-command "<shell command>"`; the same value must be passed to `uninstall` and `status`.
 - Install merges into existing config and is idempotent. Uninstall removes only handlers whose
