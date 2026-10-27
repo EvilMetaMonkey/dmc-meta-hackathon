@@ -219,7 +219,9 @@ Task labels (`dmc task start "label"`, `dmc task end`), burst/task logs, and mar
 
 Default exclusions include `.git/`, `.dmc/`, `.dart_tool/`, `build/`, and `node_modules/`. Links inside the project are excluded even if they point to another file inside it. Do not replace vault files or folders with symlinks.
 
-dmc loads root `.gitignore` and `.dmcignore` files when it starts. Its ignore language is deliberately limited:
+**Inside a Git repository, Git decides what is ignored.** dmc asks Git for the file list (`git ls-files --cached --others --exclude-standard`), so nested `.gitignore` files, negation, character classes, `.git/info/exclude` and your global excludes file all work exactly as in Git, and tracked files stay protected even if they match a pattern. dmc's default exclusions, `.dmcignore` and the link and size rules then apply on top. Submodules and nested repositories are excluded. Git must be installed: if dmc cannot find or run it inside a Git repository, checkpoints stop with `git_unavailable` instead of guessing. Checkpoint restore and redo never create, overwrite or delete a Git-ignored file.
+
+**Outside a Git repository**, dmc loads root `.gitignore` and `.dmcignore` files when it starts. Its ignore language is deliberately limited, and `.dmcignore` uses the same limited language in both cases:
 
 - Simple names, root-anchored paths beginning with `/`, directory patterns ending in `/`, `*`, `**`, and `?` are supported.
 - `.dmcignore` also accepts backslashes as legacy path separators. Prefer `/` for portable new rules.

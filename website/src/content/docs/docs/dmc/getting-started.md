@@ -62,9 +62,18 @@ present, then watches for changes with a 500 ms debounce. If status says
 - **Excluded by default:** `.git/`, `.dmc/`, `.dart_tool/`, `build/`,
   `node_modules/`, binaries, oversized files, and all links.
 
-The ignore language is a deliberate subset (names, root anchoring, `/dir/`,
-`*`, `**`, `?`). Negation and character classes are **rejected** rather than
-silently accepted. Root `.gitignore` and `.dmcignore` are loaded when the
+**In a Git repository, Git decides what is ignored.** dmc protects exactly
+the files `git ls-files --cached --others --exclude-standard` lists: nested
+`.gitignore` files, negation, character classes and `.git/info/exclude` all
+work as in Git, and tracked files stay protected. The default exclusions and
+`.dmcignore` apply on top, and submodules are skipped. Git must be installed;
+if dmc can't run it, checkpoints stop with `git_unavailable` rather than
+guess. `dmc status` shows which mode is active.
+
+**Outside Git**, the ignore language is a deliberate subset (names, root
+anchoring, `/dir/`, `*`, `**`, `?`). Negation, character classes and nested
+`.gitignore` files are **rejected** rather than silently accepted.
+`.dmcignore` always uses this subset. Ignore files are loaded when the
 watcher starts — restart after policy changes.
 
 ## 4. Day-to-day commands

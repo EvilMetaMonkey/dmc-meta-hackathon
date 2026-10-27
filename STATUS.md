@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-26 by Claude (Muse verification session)
+Last updated: 2026-10-27 by Claude (Git ignore session)
 
 ## Done
 
@@ -80,6 +80,30 @@ Last updated: 2026-10-26 by Claude (Muse verification session)
   process-wide `Directory.current` across async gaps, which raced under plain `dart test`'s
   parallel isolates (PR #2 runs 40434543893 and 40435853311). CI's test step is now
   `dart test --concurrency=1`, the documented gate, so the files run one at a time.
+- **Git-compatible ignore handling** (approved by Mike; branch `hackathon/git-ignore`). Inside a Git
+  work tree, Git decides what is ignored: the protected list is
+  `git -C <root> ls-files --cached --others --exclude-standard -z`, with DMC's default
+  directories, `.dmcignore`, link/size rules on top, and gitlinks, submodules and nested repos
+  excluded. Outside Git nothing changed. A Git work tree without a usable git fails with
+  `git_unavailable`/`git_failed` (no silent fallback). The policy fingerprint (version 2) covers
+  the mode and every ignore source Git reads. Checkpoint restore and redo refuse Git-ignored
+  targets (`git_ignored`). The watcher batches Git checks through one `git check-ignore --stdin -z`
+  per drain. `status` and `doctor` show the ignore policy. This fixes the Broken item "dmc cannot
+  take a checkpoint in this repository" (`website/.gitignore`). Verified by 10 new tests in
+  `test/git_ignore_test.dart` (204 total), and by these dogfood runs with the compiled bundle:
+  - A fresh GitHub clone of this repo at `3cd2763`, with `website/.gitignore` in place plus
+    `website/node_modules`, `dist` and `.astro`: begin → edit `HACKATHON.md` → close gave one
+    closed checkpoint (119 protected, 1 modified, 0 fatal). The protected set was identical to
+    `git ls-files -co --exclude-standard`, and `website/node_modules`, `dist`, `.astro` and `.dmc`
+    were excluded.
+  - A repo with GitHub's standard Node template at the root and the Python template in `api/`
+    (github/gitignore `main` at `0e5d690`; 6 and 1 negations, and a character class each): 8
+    protected files, identical to Git's list. Negation re-included `.yarn/patches` and
+    `.yarn/releases`, and `node_modules`, `dist`, `.env`, `__pycache__`, `.venv`, `build` and
+    `*.egg-info` were excluded. Close also succeeded after a mid-turn
+    `api/.pytest_cache/.gitignore`.
+- Prompt delay in Git mode, against that clone: `dmc agent-hook claude-code UserPromptSubmit`
+  median 176 ms over 10 runs (174–179 ms); Stop 216 ms. Was 134 ms with DMC's own rules.
 
 ## In progress
 
@@ -87,12 +111,16 @@ Last updated: 2026-10-26 by Claude (Muse verification session)
 
 ## Broken
 
-- dmc cannot take a checkpoint in this repository as it stands. `checkpoint begin` (and so the
-  agent hooks) fails with `Nested .gitignore is not supported. Move protection rules to the root
-  .dmcignore before starting DMC.` because of `website/.gitignore`. Each failed begin also leaves
-  an `invalid` checkpoint row. Found while timing the hook on a `dmc init`'d clone; the timing
-  used a clone with `website/.gitignore` moved into a root `.dmcignore`. This matters for a
-  dogfooding demo; not fixed.
+- A turn in which the agent edits an ignore source (any effective `.gitignore`, `info/exclude`,
+  `core.excludesFile`, `.dmcignore` or the config) cannot close: close records `policy_changed`
+  (fatal), the checkpoint becomes `invalid`, and checkpoint restore refuses it, so that turn has
+  no one-step rollback. The begin snapshots stay in the vault. This is the existing semantics,
+  kept on purpose; changing it needs Mike's decision.
+- Git ignores are checked by checkpoint begin/close, checkpoint restore/redo, `snap` and the
+  watcher. Not by legacy file restores (`dmc undo|restore|redo <file>`, `--burst`), which never
+  consulted ignore rules, and not by `checkpoint recover --resume|--rollback`, which finishes an
+  already-journaled operation.
+- Git mode on Windows is verified only by CI (`windows-latest`), not on a real Windows machine.
 - Not verified: whether Claude Code fires `Stop` when a turn is cancelled with Esc (dmc closes it
   on the next prompt either way); whether Muse trust of a parent folder covers the folders inside
   it; whether Muse honors `XDG_DATA_HOME` (it is not passed to hooks).
@@ -101,18 +129,21 @@ Last updated: 2026-10-26 by Claude (Muse verification session)
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. Decide how to handle the nested `website/.gitignore` (move its rules into a root `.dmcignore`,
-   or support nested ignore files) so dmc can protect this repository for the demo.
-2. A new deterministic `dmc checkpoint export <id> --to <dir>` command, for bisect.
-3. A worktree check, and the Doc companion skeleton: plain CLI, secret redaction, and one model
+1. A new deterministic `dmc checkpoint export <id> --to <dir>` command, for bisect.
+2. A worktree check, and the Doc companion skeleton: plain CLI, secret redaction, and one model
    client for Meta Model API and a local Glimmer.
-4. Then, per the spec's schedule: lesson library (Oct 29–30), bisect (Oct 31), push-to-talk voice
+3. Then, per the spec's schedule: lesson library (Oct 29–30), bisect (Oct 31), push-to-talk voice
    (Nov 1), parallel timelines (Nov 1–2), demo and README (Nov 3), submit (Nov 4).
 
 ## Session log
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
 
+- 2026-10-27 · Claude · Git ignore session (branch `hackathon/git-ignore`): CI now runs
+  `dart test --concurrency=1`; added Git-mode ignore handling (Git's file list, no silent
+  fallback, fingerprinted ignore sources, Git-ignored restore/redo refusal, batched watcher
+  checks), 10 tests, dogfood on this repo and on the Node/Python templates, and re-timed the hook
+  (176 ms). Left open: the `.gitignore`-edited-mid-turn behaviour (Broken) for Mike to decide.
 - 2026-10-26 · Claude · Muse verification on the Mac (branch `hackathon/muse-verify`): fixed the
   fixture-path CI flake, probed Muse Code 1.4.13 (both config paths, StopFailure and Interrupt
   captured), replaced the synthetic Muse fixtures, fixed uninstall byte restoration and turn
