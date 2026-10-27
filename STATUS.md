@@ -145,6 +145,12 @@ Last updated: 2026-10-27 by Claude (export and policy-drift session)
   watcher. Not by legacy file restores (`dmc undo|restore|redo <file>`, `--burst`), which never
   consulted ignore rules, and not by `checkpoint recover --resume|--rollback`, which finishes an
   already-journaled operation.
+- Windows CI flake in an older test, not caused by this branch (which does not touch the
+  watcher): `test/watcher_hardening_test.dart:155` ("real create, rename, directory move and atomic
+  replacement are captured") failed once with `PathAccessException ... renamed.txt ... errno = 32`
+  (the test deleted a file the watcher still had open). Seen on run 40540474040 (push, `8087f08`,
+  a STATUS-only commit); the pull_request run of the same commit passed, and rerunning the failed
+  job passed. Not fixed; a retry around the delete in the test would likely cure it.
 - Git mode on Windows is verified only by CI (`windows-latest`), not on a real Windows machine.
 - Not verified: whether Claude Code fires `Stop` when a turn is cancelled with Esc (dmc closes it
   on the next prompt either way); whether Muse trust of a parent folder covers the folders inside
