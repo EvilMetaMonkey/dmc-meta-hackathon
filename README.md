@@ -195,6 +195,7 @@ These commands support diagnosis, interrupted recovery, integration, and storage
 | `dmc checkpoint recover <operation-id> --rollback` | Returns every target to its captured pre-operation state. |
 | `dmc checkpoint release <id>` | Explicitly abandons/purges retention pins while keeping small metadata. |
 | `dmc checkpoint export <id> --to <dir> [--state before\|after]` | Writes the project as it was at a checkpoint (after state by default) to a new or empty directory outside the project, without touching the working copy. Only protected files are included: ignored dependencies such as `node_modules` are not. |
+| `doc summarize <id>` (in `doc/`) | Doc, the separate AI companion, summarizes a checkpoint in plain English. It reads dmc only through its JSON interface. See [doc/README.md](doc/README.md). |
 | `dmc capabilities --json --schema-version 1` | Reports the stable Haven contract, schema versions, checkpoint commands, safety capabilities, and cancellation requirements. |
 | `dmc gc --dry-run` | Previews removal of expired, unprotected history. |
 | `dmc gc` | Removes that expired history. Stop the watcher and other dmc commands first. |

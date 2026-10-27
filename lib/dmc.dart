@@ -16,6 +16,7 @@ export 'src/database.dart';
 export 'src/diff.dart';
 export 'src/gc.dart';
 export 'src/git_ignore.dart';
+export 'src/git_worktree.dart';
 export 'src/hook_installer.dart';
 export 'src/machine_output.dart';
 export 'src/status.dart';

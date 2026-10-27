@@ -79,13 +79,17 @@ web page.
 
 ### Meta models
 
-| Model or tool | Job |
-|---|---|
-| Muse Code | The demo agent, and the agent in each parallel timeline |
-| Muse Spark 1.3 | Natural-language restore, bisect explanations, lesson notes |
-| Muse Wonder | Plans the three timelines and judges the results |
-| Muse Glimmer | Runs locally: per-checkpoint summaries, lesson matching, and `doc --local` |
-| Muse Voice Transcribe | "Hey Doc" push-to-talk |
+| Model or tool | Where | Job |
+|---|---|---|
+| Muse Code | local CLI | The demo agent, and the agent in each parallel timeline |
+| Muse Spark 1.3 (`muse-spark-1.3`) | Meta Model API | Natural-language restore |
+| Muse Spark Open (`meta-models/muse-spark-open-1026`) | Baseten | The workhorse: bisect explanations and lesson-note drafts; also restore's fallback |
+| Muse Wonder (`muse-wonder-1.0`) | Meta Model API | Plans the three timelines and judges the results |
+| Muse Glimmer | runs locally | Per-checkpoint summaries, lesson matching, and `doc --local` |
+| Muse Voice Transcribe (`muse-voice-transcribe-1.0`) | Meta Model API | "Hey Doc" push-to-talk |
+
+Model IDs were confirmed with `GET /models` on 2026-10-27. Role routing, prices and budgets are
+in [doc/README.md](doc/README.md).
 
 Theme: **Push the Frontier**.
 

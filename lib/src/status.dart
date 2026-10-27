@@ -6,6 +6,7 @@ import 'checkpoint_operation_repository.dart';
 import 'checkpoint_operation_models.dart';
 import 'daemon.dart';
 import 'database.dart';
+import 'git_worktree.dart';
 import 'ignore.dart';
 import 'workspace.dart';
 import 'watcher_control.dart';
@@ -82,6 +83,7 @@ Future<int> showStatus({
     print(
       'Ignore policy: ${(await describeIgnorePolicy(paths.rootPath)).text}',
     );
+    describeGitWorktree(paths.rootPath)?.lines.forEach(print);
   }
   if (live != null || health != null) {
     final state = live ?? health!;

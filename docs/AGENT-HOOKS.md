@@ -170,6 +170,24 @@ compiled bundle), `muse exec "Create a file named hello.txt …" --disable-appro
 `dmc hooks uninstall --agent muse-code --apply` restored `~/.config/muse/settings.json` to its
 exact original bytes (same SHA-256).
 
+**Session worktrees, `muse -w` (verified 1.4.13 on macOS, 2026-10-27).** `muse exec -w create
+…` (a bare `-w` means `create`) makes a **linked Git worktree inside the repository folder**:
+
+- Path: `<repo>/.muse/worktrees/<YYYYMMDD>-<4 hex>` (for example `.muse/worktrees/20261027-0d52`).
+- Branch: `muse/session-<session-uuid>`, created from `HEAD` (or `--worktree-base <ref>`).
+- The worktree's `.git` is a file, `gitdir: <repo>/.git/worktrees/<name>`.
+- Muse appends `/.muse/worktrees/` to `.git/info/exclude`, so the main work tree's Git (and so
+  dmc's Git mode) ignores it. It also keeps reservation state under
+  `.muse/worktrees/.session-worktree-reservations/`.
+- Muse treats the worktree as the workspace root: hooks run there, and the payload `cwd` is the
+  worktree path.
+- A clean worktree is removed when the session ends. A dirty one is kept and Muse prints
+  `session worktree retained at … (dirty worktree retained)`; remove it with
+  `git worktree remove` and delete the `muse/session-…` branch.
+
+Because the worktree sits inside the repository, a hook there used to walk up into the main work
+tree's `.dmc/` and record the turn in the wrong vault. See "Other work trees" below.
+
 ### To re-verify on a new Muse Code version
 
 1. `muse --version`.
@@ -211,6 +229,13 @@ The rest of this page describes what dmc builds on these facts.
 | Stop, StopFailure, SessionEnd (both agents), Interrupt (Muse) | close the active checkpoint if this agent and session own it and, when the event has a turn ID, it is the same turn |
 | SessionStart and anything else | nothing |
 
+- **Other work trees:** if the nearest `.git` marker (directory or file) at or above the start
+  directory is below the `.dmc/` root found, the turn belongs to another work tree: a linked
+  worktree (such as a `muse -w` session), a nested repository or a submodule. The hook records
+  nothing and warns on stderr. It uses marker positions only; no git process runs in the hook.
+  Each worktree needs its own `dmc init`, and then has its own vault and checkpoints. `status`
+  and `doctor` show whether the workspace is a linked worktree, its main work tree, and which
+  linked worktrees have a vault.
 - **Workspace:** walk up from payload `cwd` (else the process cwd) to the nearest directory that
   contains `.dmc/`. With no workspace, the hook does nothing.
 - **Missing stdin:** if stdin is empty, invalid or not an object, the hook rebuilds a minimal

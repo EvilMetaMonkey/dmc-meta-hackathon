@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-27 by Claude (export and policy-drift session)
+Last updated: 2026-10-27 by Claude (worktree check and Doc skeleton session)
 
 ## Done
 
@@ -130,6 +130,43 @@ Last updated: 2026-10-27 by Claude (export and policy-drift session)
 - Gates for this branch: analyzer clean, `dart test --concurrency=1` 218 passed, Haven contract
   tests 3 passed unchanged. PR #4 CI passed on ubuntu, macOS, macOS Intel and Windows in both the
   push and pull_request runs for `c7bb435` (and the push run for `b0b8040`).
+- **Worktree check** (branch `hackathon/doc-skeleton`). `muse -w` (Muse Code 1.4.13, verified on
+  the Mac) creates a linked worktree inside the repository at
+  `<repo>/.muse/worktrees/<YYYYMMDD>-<4 hex>`, on branch `muse/session-<uuid>`, adds
+  `/.muse/worktrees/` to `.git/info/exclude`, removes a clean worktree at session end and keeps a
+  dirty one. A hook there used to record the turn in the main vault. `dmc agent-hook` now does
+  nothing (stderr warning, exit 0, empty stdout) when the nearest `.git` marker above its cwd is
+  below the `.dmc` root, using marker positions only. `status` and `doctor` report a linked
+  worktree and its main work tree, or a main work tree's linked worktrees and which have a vault.
+  Verified by 5 tests in `test/worktree_test.dart`:
+  - a hook from a worktree with no vault records nothing in the main vault;
+  - after `dmc init` there, checkpoints go to the worktree's own vault;
+  - two worktrees taking turns get independent checkpoints, each restored on its own;
+  - a nested repo and a submodule are ignored;
+  - status and doctor print the layout.
+
+  dmc suite: 223 passed.
+- **Doc companion skeleton** in `doc/` (separate package `dmc_doc`; dmc still runs no models).
+  It has one OpenAI-compatible client (meta, baseten, local) with retries, timeouts, the one
+  logged meta → baseten fallback for `restore`, budgets and usage in `~/.config/dmc-doc/`, a
+  redaction module, and `doc models [--check] [--available]`, `doc summarize`, `doc usage`. It
+  reads dmc only via `--json --schema-version 1`. CI analyzes and tests `doc/`. Verified by 41
+  Doc tests (fake HTTP servers for every provider path, redaction cases, and a compiled dmc in a
+  temp workspace), plus these real calls on the Mac:
+  - The real model IDs from meta `GET /models` are `muse-spark-1.3`, `muse-wonder-1.0` and
+    `muse-voice-transcribe-1.0`. Muse Glimmer is not on the Meta API.
+  - `doc models --check`: baseten ok in 937 ms, meta `muse-spark-1.3` ok in 2,044 ms, local
+    reports plainly that Ollama has no `muse-glimmer`.
+  - `doc summarize` on a real Claude Code checkpoint from a `/tmp` repo worked on baseten (1.8 s,
+    $0.0020) and on meta (2.4 s, $0.0025).
+  - Real use so far: meta $0.0034 (2 calls), baseten $0.0100 (4 calls) in `usage.json`, plus
+    about $0.006 of manual Baseten probes.
+  - Found and fixed: Muse Spark Open spends small token limits on reasoning (`finish_reason:
+    length`, null content). Doc now reports `truncated`, and sends `reasoning_effort: low` to
+    Baseten too (1,403 → 537 completion tokens on the same prompt).
+- Mike's `~/.zshrc` line 46 (`api.meta.ai api key=…`) was not a shell assignment. With his
+  approval it was rewritten to `export MODEL_API_KEY='…'` without reading the value (backup:
+  `~/.zshrc.backup-20261027-155542`, mode 600).
 
 ## In progress
 
@@ -152,6 +189,19 @@ Last updated: 2026-10-27 by Claude (export and policy-drift session)
   a STATUS-only commit); the pull_request run of the same commit passed, and rerunning the failed
   job passed. Not fixed; a retry around the delete in the test would likely cure it.
 - Git mode on Windows is verified only by CI (`windows-latest`), not on a real Windows machine.
+- Muse Glimmer is not available locally. The Mac has 24 GiB of memory (`hw.memsize`
+  25,769,803,776, Apple M5). Ollama (`/usr/local/bin/ollama`, serving on 11434), llama.cpp
+  (`llama-server`, `llama-cli` in `/opt/homebrew/bin`) and LM Studio (serving on 1234) are
+  installed; a vMLX server is on 8080. None has a Muse Glimmer model, so the `summary` role (local
+  by default) fails with a clear 404 message until Glimmer is loaded or
+  `--role-provider summary=baseten` is used. Nothing was downloaded.
+- One unexplained Doc test failure: during the final gates on the Mac, one
+  `dart test --concurrency=1` run in `doc/` reported a failure (the output was cut to its last
+  line, so the failing test is unknown). It did not reproduce in 15 later runs, including the same
+  sequence (dmc suite, bundle rebuild, Doc suite). A suspect, not confirmed: `closedBaseUrl()` in
+  `doc/test/support/fake_provider.dart` frees a port that the OS could hand to a later fake server.
+- The worktree hook rule and `doc` are verified on macOS and by CI only; `doc` on Windows is
+  covered by CI tests, not a real Windows run.
 - Not verified: whether Claude Code fires `Stop` when a turn is cancelled with Esc (dmc closes it
   on the next prompt either way); whether Muse trust of a parent folder covers the folders inside
   it; whether Muse honors `XDG_DATA_HOME` (it is not passed to hooks).
@@ -160,8 +210,8 @@ Last updated: 2026-10-27 by Claude (export and policy-drift session)
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. A worktree check, and the Doc companion skeleton: plain CLI, secret redaction, and one model
-   client for Meta Model API and a local Glimmer.
+1. Get Muse Glimmer running locally (it fits in 24 GiB), set `providers.local.defaultModel` to
+   its name, and rerun `doc summarize` with the default local `summary` role.
 2. Then, per the spec's schedule: lesson library (Oct 29–30), bisect (Oct 31; build on
    `checkpoint export`, and set up ignored dependencies such as `node_modules` and `.dart_tool`
    in each export, because export holds only protected files), push-to-talk voice
@@ -171,6 +221,11 @@ Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
 
+- 2026-10-27 · Claude · Worktree check and Doc skeleton (branch `hackathon/doc-skeleton`):
+  probed `muse -w`, kept agent hooks inside their own work tree, added worktree reporting to
+  status and doctor, and built the `doc/` package: model client, redaction, router, and the
+  models, summarize and usage commands. Verified with tests and real baseten and meta calls.
+  Left open: a local Muse Glimmer.
 - 2026-10-27 · Claude · Export and policy drift (branch `hackathon/export-drift`): per-file
   handling of ignore-policy drift (schema 5, `left_scope`/`entered_scope`, `skipped` in plans)
   and `dmc checkpoint export`. Verified with tests, a real Claude Code turn that edited
