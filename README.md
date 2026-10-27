@@ -177,7 +177,7 @@ New users and Haven should use this workflow for agent runs.
 | `dmc checkpoint close <id>` | Captures and verifies the post-run manifest and classifies changes. Stop the agent first. |
 | `dmc checkpoint list [--limit <count>]` | Lists recent checkpoints, protection counts, lifecycle states, and recorded operation IDs. |
 | `dmc checkpoint show <id>` | Shows lifecycle state, protected files, exclusions, and fatal issues. |
-| `dmc checkpoint diff <id>` | Lists modified, created, and deleted paths; it does not change files. |
+| `dmc checkpoint diff <id>` | Lists modified, created, and deleted paths (and files whose protection changed because the ignore policy changed); it does not change files. |
 | `dmc checkpoint restore <id> [--dry-run]` | Preflights and previews the whole checkpoint. Preview is the default. |
 | `dmc checkpoint restore <id> --apply` | Restores all changed eligible files through a durable operation journal. The watcher must be stopped. |
 | `dmc checkpoint redo <id> [--dry-run]` | Previews the post-run state after a completed checkpoint restore. |
@@ -194,6 +194,7 @@ These commands support diagnosis, interrupted recovery, integration, and storage
 | `dmc checkpoint recover <operation-id> --resume` | Continues an interrupted checkpoint restore or redo. |
 | `dmc checkpoint recover <operation-id> --rollback` | Returns every target to its captured pre-operation state. |
 | `dmc checkpoint release <id>` | Explicitly abandons/purges retention pins while keeping small metadata. |
+| `dmc checkpoint export <id> --to <dir> [--state before\|after]` | Writes the project as it was at a checkpoint (after state by default) to a new or empty directory outside the project, without touching the working copy. Only protected files are included: ignored dependencies such as `node_modules` are not. |
 | `dmc capabilities --json --schema-version 1` | Reports the stable Haven contract, schema versions, checkpoint commands, safety capabilities, and cancellation requirements. |
 | `dmc gc --dry-run` | Previews removal of expired, unprotected history. |
 | `dmc gc` | Removes that expired history. Stop the watcher and other dmc commands first. |
