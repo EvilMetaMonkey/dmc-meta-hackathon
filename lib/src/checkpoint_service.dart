@@ -350,7 +350,12 @@ class CheckpointService {
       final policy = await _loadPolicy(paths);
       repository.prepareClose(checkpointId);
       final issues = repository.getIssues(checkpointId);
-      if (policy.fingerprint != checkpoint.policyFingerprint) {
+      // Ignore-policy drift is handled per file instead of invalidating the
+      // checkpoint: the close-time policy decides what is protected now, and
+      // files whose protection changed are recorded as left_scope or
+      // entered_scope, which restore and redo never overwrite or delete.
+      final policyChanged = policy.fingerprint != checkpoint.policyFingerprint;
+      if (policyChanged) {
         _addIssue(
           repository,
           issues,
@@ -358,10 +363,21 @@ class CheckpointService {
           phase: 'close',
           code: 'policy_changed',
           message:
-              'Configuration or ignore policy changed after begin. Restore the original policy and begin a new checkpoint.',
-          fatal: true,
+              'Configuration or ignore policy changed during the checkpoint. Files that left or entered protection are recorded per file, and restore and redo skip them.',
+          fatal: false,
         );
-      } else {
+      }
+      // Paths excluded at begin (ignored, linked, nested repositories). A
+      // file at or below one of them that is protected at close entered scope.
+      final excludedAtBegin = [
+        for (final issue in issues)
+          if (issue.phase == 'begin' && !issue.fatal && issue.filePath != null)
+            issue.filePath!,
+      ];
+      bool wasExcludedAtBegin(String relative) => excludedAtBegin.any(
+        (excluded) => excluded == relative || p.isWithin(excluded, relative),
+      );
+      {
         final store = _storeFactory(database, paths.snapshotsPath);
         final before = {
           for (final file in repository.getFiles(checkpointId))
@@ -411,7 +427,17 @@ class CheckpointService {
             }
             after[relative] = captured;
             final prior = before[relative];
-            if (prior == null) {
+            if (prior == null &&
+                policyChanged &&
+                wasExcludedAtBegin(relative)) {
+              repository.addEnteredScopeFile(
+                checkpointId: checkpointId,
+                filePath: relative,
+                snapshotId: captured.snapshotId,
+                hash: captured.hash,
+                mode: captured.mode,
+              );
+            } else if (prior == null) {
               repository.addCreatedFile(
                 checkpointId: checkpointId,
                 filePath: relative,
@@ -433,13 +459,32 @@ class CheckpointService {
               );
             }
           }
-          for (final relative in before.keys.where(
-            (relative) => !after.containsKey(relative),
-          )) {
-            final absolute = p.join(paths.rootPath, relative);
-            if (FileSystemEntity.typeSync(absolute, followLinks: false) ==
-                FileSystemEntityType.notFound) {
+          final missing = [
+            for (final relative in before.keys)
+              if (!after.containsKey(relative)) relative,
+          ];
+          final gone = {
+            for (final relative in missing)
+              if (FileSystemEntity.typeSync(
+                    p.join(paths.rootPath, relative),
+                    followLinks: false,
+                  ) ==
+                  FileSystemEntityType.notFound)
+                relative,
+          };
+          // A deleted file the close-time policy no longer covers left scope:
+          // restoring it would create an ignored file.
+          final goneOutOfScope = policyChanged
+              ? await policy.ignore.outOfScope(gone)
+              : const <String>{};
+          for (final relative in missing) {
+            if (gone.contains(relative) && !goneOutOfScope.contains(relative)) {
               repository.setAfterAbsent(
+                checkpointId: checkpointId,
+                filePath: relative,
+              );
+            } else if (policyChanged) {
+              repository.setLeftScope(
                 checkpointId: checkpointId,
                 filePath: relative,
               );
@@ -486,6 +531,7 @@ class CheckpointService {
         closedAt: _now(),
         fatalErrors: fatalCount,
         exclusions: exclusionCount,
+        closePolicyFingerprint: policy.fingerprint,
       );
       checkpoint = repository.getCheckpoint(checkpointId)!;
       return _viewResult(
@@ -1167,11 +1213,19 @@ List<String> checkpointHumanLines(CommandResult result) {
     final files = result.data['files'];
     if (files is List) {
       for (final file in files.whereType<Map>()) {
+        final scope = file['scope'];
         if (result.command == 'checkpoint.show') {
           final after = file['after'] as Map?;
-          lines.add(
-            '${file['path']}: ${file['change'] ?? 'protected'} (before ${(file['before'] as Map)['kind']}, after ${after?['kind'] ?? 'pending'})',
-          );
+          lines.add(switch (scope) {
+            'left_scope' =>
+              '${file['path']}: left scope (before ${(file['before'] as Map)['kind']}, not captured at close; restore and redo skip it)',
+            'entered_scope' =>
+              '${file['path']}: entered scope (no before state, after ${after?['kind']}; restore never deletes or overwrites it)',
+            _ =>
+              '${file['path']}: ${file['change'] ?? 'protected'} (before ${(file['before'] as Map)['kind']}, after ${after?['kind'] ?? 'pending'})',
+          });
+        } else if (scope != null) {
+          lines.add('$scope: ${file['path']}');
         } else if (file['change'] != null && file['change'] != 'unchanged') {
           lines.add('${file['change']}: ${file['path']}');
         }
@@ -1180,7 +1234,9 @@ List<String> checkpointHumanLines(CommandResult result) {
   }
   for (final warning in result.warnings) {
     lines.add(
-      '[DMC] Excluded${warning.path == null ? '' : ' ${warning.path}'}: ${warning.message}',
+      warning.code == 'policy_changed'
+          ? '[DMC] Warning: ${warning.message}'
+          : '[DMC] Excluded${warning.path == null ? '' : ' ${warning.path}'}: ${warning.message}',
     );
   }
   for (final error in result.errors) {

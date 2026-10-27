@@ -139,6 +139,39 @@ class CheckpointRepository {
     );
   }
 
+  /// A file protected at begin that the close-time policy no longer covers.
+  void setLeftScope({required String checkpointId, required String filePath}) {
+    database.db.execute(
+      '''
+      UPDATE checkpoint_files
+      SET after_kind = NULL, after_snapshot_id = NULL, after_hash = NULL,
+          after_mode = NULL, change_kind = NULL, scope_change = 'left_scope'
+      WHERE checkpoint_id = ? AND file_path = ?
+      ''',
+      [checkpointId, filePath],
+    );
+  }
+
+  /// A file the close-time policy covers but the begin-time policy excluded.
+  /// It has no before state.
+  void addEnteredScopeFile({
+    required String checkpointId,
+    required String filePath,
+    required int snapshotId,
+    required String hash,
+    required int? mode,
+  }) {
+    database.db.execute(
+      '''
+      INSERT INTO checkpoint_files
+        (checkpoint_id, file_path, before_kind, after_kind,
+         after_snapshot_id, after_hash, after_mode, change_kind, scope_change)
+      VALUES (?, ?, 'absent', 'file', ?, ?, ?, NULL, 'entered_scope')
+      ''',
+      [checkpointId, filePath, snapshotId, hash, mode],
+    );
+  }
+
   void setAfterAbsent({
     required String checkpointId,
     required String filePath,
@@ -207,7 +240,7 @@ class CheckpointRepository {
         UPDATE checkpoint_files
         SET after_kind = NULL, after_snapshot_id = NULL, after_hash = NULL,
             after_mode = NULL,
-            change_kind = NULL
+            change_kind = NULL, scope_change = NULL
         WHERE checkpoint_id = ?
         ''',
         [id],
@@ -221,13 +254,22 @@ class CheckpointRepository {
     required int closedAt,
     required int fatalErrors,
     required int exclusions,
+    String? closePolicyFingerprint,
   }) {
     database.db.execute(
       '''
       UPDATE checkpoints SET status = ?, closed_at = ?,
-        fatal_error_count = ?, exclusion_count = ? WHERE id = ?
+        fatal_error_count = ?, exclusion_count = ?,
+        close_policy_fingerprint = ? WHERE id = ?
       ''',
-      [valid ? 'closed' : 'invalid', closedAt, fatalErrors, exclusions, id],
+      [
+        valid ? 'closed' : 'invalid',
+        closedAt,
+        fatalErrors,
+        exclusions,
+        closePolicyFingerprint,
+        id,
+      ],
     );
   }
 
@@ -307,6 +349,7 @@ class CheckpointRepository {
     closedAt: row['closed_at'] as int?,
     releasedAt: row['released_at'] as int?,
     policyFingerprint: row['policy_fingerprint'] as String,
+    closePolicyFingerprint: row['close_policy_fingerprint'] as String?,
     fatalErrorCount: row['fatal_error_count'] as int,
     exclusionCount: row['exclusion_count'] as int,
     agent: row['agent'] == null
@@ -335,6 +378,7 @@ class CheckpointRepository {
     afterHash: row['after_hash'] as String?,
     afterMode: row['after_mode'] as int?,
     changeKind: checkpointChangeKindFromText(row['change_kind'] as String?),
+    scopeChange: CheckpointScopeChange.fromText(row['scope_change'] as String?),
   );
 
   CheckpointIssue _issue(dynamic row) => CheckpointIssue(

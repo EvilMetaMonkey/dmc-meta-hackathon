@@ -226,7 +226,7 @@ void main() {
   });
 
   test(
-    'one active checkpoint is enforced and policy drift invalidates close',
+    'one active checkpoint is enforced and policy drift is recorded at close',
     () async {
       File(p.join(root.path, 'notes.txt')).writeAsStringSync('before');
       final first = await service.begin();
@@ -237,10 +237,15 @@ void main() {
       expect(second.errors.single.code, 'checkpoint_already_active');
       File(p.join(root.path, '.dmcignore')).writeAsStringSync('generated/\n');
       final close = await service.close(id);
-      expect(close.exitCode, 3);
-      expect((close.data['checkpoint'] as Map)['status'], 'invalid');
+      expect(close.exitCode, 0, reason: close.encode());
+      final closed = close.data['checkpoint'] as Map;
+      expect(closed['status'], 'closed');
       expect(
-        close.errors.any((error) => error.code == 'policy_changed'),
+        closed['closePolicyFingerprint'],
+        isNot(closed['policyFingerprint']),
+      );
+      expect(
+        close.warnings.any((warning) => warning.code == 'policy_changed'),
         isTrue,
       );
     },
@@ -398,10 +403,7 @@ void main() {
       expect(beginJson['schemaVersion'], 1);
       expect(beginJson['dmcVersion'], '1.1.0-dev.5.1');
       expect(beginJson['exitCode'], 0);
-      expect(
-        beginJson['workspace']['path'],
-        root.resolveSymbolicLinksSync(),
-      );
+      expect(beginJson['workspace']['path'], root.resolveSymbolicLinksSync());
       expect(beginJson['workspace']['fingerprint'], startsWith('sha256:'));
       expect(beginJson['command'], 'checkpoint.begin');
       expect(beginJson['ok'], isTrue);

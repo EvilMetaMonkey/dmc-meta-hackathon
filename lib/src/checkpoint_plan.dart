@@ -98,6 +98,11 @@ class CheckpointPlan {
   final List<CheckpointPlanAction> actions;
   final List<CheckpointPlanIssue> conflicts;
   final List<CheckpointPlanIssue> dataErrors;
+
+  /// Files whose protection changed during the checkpoint (left_scope,
+  /// entered_scope). They are never written; listing them does not block
+  /// the plan.
+  final List<CheckpointPlanIssue> skipped;
   final CheckpointPlanIssue? checkpointError;
 
   const CheckpointPlan({
@@ -106,6 +111,7 @@ class CheckpointPlan {
     this.actions = const [],
     this.conflicts = const [],
     this.dataErrors = const [],
+    this.skipped = const [],
     this.checkpointError,
   });
 
@@ -127,6 +133,7 @@ class CheckpointPlan {
     'actions': actions.map((action) => action.toJson()).toList(),
     'conflicts': conflicts.map((issue) => issue.toJson()).toList(),
     'dataErrors': dataErrors.map((issue) => issue.toJson()).toList(),
+    'skipped': skipped.map((issue) => issue.toJson()).toList(),
   };
 }
 
@@ -190,8 +197,16 @@ class CheckpointPlanner {
     final actions = <CheckpointPlanAction>[];
     final conflicts = <CheckpointPlanIssue>[];
     final dataErrors = <CheckpointPlanIssue>[];
+    final skipped = <CheckpointPlanIssue>[];
     var sequence = 0;
     for (final file in checkpoints.getFiles(checkpointId)) {
+      if (file.scopeChange != null) {
+        final issue = _scopeChangeIssue(file, direction);
+        if (issue != null) {
+          (issue.code == 'workspace_drift' ? conflicts : skipped).add(issue);
+        }
+        continue;
+      }
       if (file.changeKind == null ||
           file.changeKind == CheckpointChangeKind.unchanged ||
           file.afterKind == null) {
@@ -295,7 +310,54 @@ class CheckpointPlanner {
       actions: actions,
       conflicts: conflicts,
       dataErrors: dataErrors,
+      skipped: skipped,
     );
+  }
+
+  /// Files whose protection changed are never written. Redo checks that an
+  /// entered_scope file still matches its recorded after state, which is
+  /// already the redo result; a changed file is a conflict.
+  CheckpointPlanIssue? _scopeChangeIssue(
+    CheckpointFileRecord file,
+    CheckpointOperationDirection direction,
+  ) {
+    switch (file.scopeChange!) {
+      case CheckpointScopeChange.leftScope:
+        return CheckpointPlanIssue(
+          'left_scope',
+          'Protected at begin but excluded by the ignore policy at close. Its before state is kept; ${direction.name} leaves it untouched.',
+          path: file.filePath,
+        );
+      case CheckpointScopeChange.enteredScope:
+        if (direction == CheckpointOperationDirection.restore) {
+          return CheckpointPlanIssue(
+            'entered_scope',
+            'Excluded at begin and protected at close, so it has no before state. Restore never deletes or overwrites it.',
+            path: file.filePath,
+          );
+        }
+        try {
+          final current = readWorkspaceState(paths, file.filePath);
+          if (current.matches(
+            file.afterKind ?? CheckpointFileKind.absent,
+            file.afterHash,
+            file.afterMode,
+          )) {
+            return CheckpointPlanIssue(
+              'entered_scope',
+              'Excluded at begin; it still matches its recorded after state, so redo leaves it as it is.',
+              path: file.filePath,
+            );
+          }
+        } catch (_) {
+          // Fall through: an unreadable target is never written.
+        }
+        return CheckpointPlanIssue(
+          'workspace_drift',
+          'Entered protection during the checkpoint and has changed since; redo will not overwrite it.',
+          path: file.filePath,
+        );
+    }
   }
 
   CheckpointPlanIssue? _verifySnapshot(

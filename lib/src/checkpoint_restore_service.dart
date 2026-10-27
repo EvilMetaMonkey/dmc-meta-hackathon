@@ -968,6 +968,15 @@ List<String> checkpointOperationHumanLines(CommandResult result) {
   }
   final actions = data['actions'];
   if (actions is List) lines.add('Files: ${actions.length}');
+  final skipped = data['skipped'];
+  if (skipped is List && skipped.isNotEmpty) {
+    lines.add(
+      'Skipped (protection changed during the checkpoint; never written): ${skipped.length}',
+    );
+    for (final item in skipped.whereType<Map>()) {
+      lines.add('  ${item['code']}: ${item['path']}');
+    }
+  }
   final operationId = data['operationId'];
   if (operationId != null) lines.add('Operation: $operationId');
   for (final warning in result.warnings) {

@@ -190,7 +190,7 @@ void main() {
   });
 
   test(
-    'editing an ignore source mid-turn fails close as policy_changed',
+    'editing an ignore source mid-turn is recorded as policy_changed',
     () async {
       write('.gitignore', '*.log\n');
       write('web/.gitignore', 'dist/\n');
@@ -206,11 +206,11 @@ void main() {
         final id = await begin();
         edit();
         final close = await service().close(id);
-        expect(close.exitCode, 3, reason: close.encode());
-        expect(
-          records(id).issues.map((issue) => issue.code),
-          contains('policy_changed'),
-        );
+        expect(close.exitCode, 0, reason: close.encode());
+        final warning = records(
+          id,
+        ).issues.singleWhere((issue) => issue.code == 'policy_changed');
+        expect(warning.fatal, isFalse);
       }
     },
   );
@@ -230,6 +230,10 @@ void main() {
       final close = await service().close(id);
       expect(close.exitCode, 0, reason: close.encode());
       expect(
+        records(id).issues.map((issue) => issue.code),
+        isNot(contains('policy_changed')),
+      );
+      expect(
         records(id).files
             .where((file) => file.changeKind == CheckpointChangeKind.modified)
             .map((file) => file.filePath),
@@ -240,7 +244,7 @@ void main() {
       final next = await begin();
       write('cache/.gitignore', '*\n');
       final changed = await service().close(next);
-      expect(changed.exitCode, 3, reason: changed.encode());
+      expect(changed.exitCode, 0, reason: changed.encode());
       expect(
         records(next).issues.map((issue) => issue.code),
         contains('policy_changed'),

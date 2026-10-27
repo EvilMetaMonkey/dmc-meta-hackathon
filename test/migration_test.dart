@@ -46,7 +46,10 @@ void main() {
         ..writeAsStringSync('new work');
       final db = DmcDatabase(paths.dbPath)..initialize();
       try {
-        expect(db.db.select('PRAGMA user_version').first.values.first, 4);
+        expect(
+          db.db.select('PRAGMA user_version').first.values.first,
+          DmcDatabase.schemaVersion,
+        );
         expect(db.db.select('PRAGMA foreign_keys').first.values.first, 1);
         expect(db.db.select('PRAGMA synchronous').first.values.first, 2);
         expect(db.getSnapshotById(42)!.hash, hash);
@@ -160,7 +163,10 @@ void main() {
       versionOne.close();
 
       final migrated = DmcDatabase(paths.dbPath)..initialize();
-      expect(migrated.db.select('PRAGMA user_version').single.values.first, 4);
+      expect(
+        migrated.db.select('PRAGMA user_version').single.values.first,
+        DmcDatabase.schemaVersion,
+      );
       expect(migrated.getSnapshotById(7)!.filePath, 'keep.txt');
       expect(
         migrated.db.select(
@@ -199,7 +205,10 @@ void main() {
     versionTwo.close();
 
     final migrated = DmcDatabase(paths.dbPath)..initialize();
-    expect(migrated.db.select('PRAGMA user_version').single.values.first, 4);
+    expect(
+      migrated.db.select('PRAGMA user_version').single.values.first,
+      DmcDatabase.schemaVersion,
+    );
     expect(migrated.getHistoryCount(), 1);
     expect(
       migrated.db.select(
@@ -208,6 +217,53 @@ void main() {
       hasLength(2),
     );
     migrated.close();
+  });
+
+  test('version 4 vault gains policy-drift columns without rewriting rows', () {
+    final initial = DmcDatabase(paths.dbPath)..initialize();
+    CheckpointRepository(initial).createCheckpoint(
+      id: 'cp_v4',
+      label: 'before drift handling',
+      source: 'haven',
+      createdAt: 10,
+      policyFingerprint: 'policy',
+    );
+    CheckpointRepository(initial).finishClose(
+      'cp_v4',
+      valid: false,
+      closedAt: 11,
+      fatalErrors: 1,
+      exclusions: 0,
+    );
+    initial.close();
+    final versionFour = sqlite.sqlite3.open(paths.dbPath);
+    versionFour.execute(
+      'ALTER TABLE checkpoints DROP COLUMN close_policy_fingerprint',
+    );
+    versionFour.execute(
+      'ALTER TABLE checkpoint_files DROP COLUMN scope_change',
+    );
+    versionFour.execute('PRAGMA user_version = 4');
+    versionFour.close();
+
+    final migrated = DmcDatabase(paths.dbPath)..initialize();
+    try {
+      expect(migrated.db.select('PRAGMA user_version').single.values.first, 5);
+      final fileColumns = {
+        for (final row in migrated.db.select(
+          'PRAGMA table_info(checkpoint_files)',
+        ))
+          row['name'] as String,
+      };
+      expect(fileColumns, contains('scope_change'));
+      // An invalid checkpoint stays invalid; old rows gain only nulls.
+      final existing = CheckpointRepository(migrated).getCheckpoint('cp_v4')!;
+      expect(existing.status, CheckpointStatus.invalid);
+      expect(existing.closePolicyFingerprint, isNull);
+      expect(existing.toJson()['closePolicyFingerprint'], isNull);
+    } finally {
+      migrated.close();
+    }
   });
 
   test('version 3 vault gains agent context without rewriting checkpoints', () {
@@ -236,7 +292,10 @@ void main() {
 
     final migrated = DmcDatabase(paths.dbPath)..initialize();
     try {
-      expect(migrated.db.select('PRAGMA user_version').single.values.first, 4);
+      expect(
+        migrated.db.select('PRAGMA user_version').single.values.first,
+        DmcDatabase.schemaVersion,
+      );
       final columns = {
         for (final row in migrated.db.select('PRAGMA table_info(checkpoints)'))
           row['name'] as String,
