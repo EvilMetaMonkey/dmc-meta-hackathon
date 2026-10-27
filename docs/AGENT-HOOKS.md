@@ -234,17 +234,25 @@ Agent context is stored per checkpoint (schema 4): `agent`, `sessionId`, `turnId
 `transcriptPath` and, at close, `transcriptBytes` and `transcriptSha256` of the transcript
 bytes read at that moment. For Muse, a missing `transcript_path` (always, in 1.4.13) falls back
 to the session's `session.jsonl`, found by session ID under `$XDG_DATA_HOME` or
-`$HOME/.local/share`.
+`$HOME/.local/share`. It appears as an additive `agent` object (null for non-agent checkpoints)
+in machine schema 1 output, and in `checkpoint show`, `checkpoint list` and `status`.
 
-**Prompt delay (measured 2026-10-26, macOS arm64, compiled bundle):** `dmc agent-hook claude-code
-UserPromptSubmit`, with the captured fixture piped in, run against a `dmc init`'d clone of this
-repository (116 tracked files, 2.1 MB), took a **134 ms median** over 8 runs (165 ms on the first
-run). When it also had to close a turn left open by a missed Stop, it took about 294 ms. Stop took
-a 174 ms median. Process startup (`dmc --version`) is about 9 ms, so the workspace scan and the
-SQLite writes take most of the time. The clone had to have `website/.gitignore` moved into a
-root `.dmcignore` first; see STATUS.md, Broken. It appears as an additive `agent` object (null for
-non-agent checkpoints) in machine schema 1 output, and in `checkpoint show`, `checkpoint list`
-and `status`.
+**Git in the hook environment.** In a Git work tree, every hook begin and close runs git (see
+AGENTS.md, ignore section). Muse Code 1.4.13 passes the user's full login `PATH` to hooks (see
+"Environment" above), and dmc also looks in `/usr/bin`, `/opt/homebrew/bin` and
+`/usr/local/bin`. If git still cannot be found, the hook's begin records `git_unavailable` and the
+warning goes to stderr; the agent turn is never blocked.
+
+**Prompt delay (macOS arm64, compiled bundle, `dmc agent-hook claude-code UserPromptSubmit` with
+the captured fixture piped in, against a `dmc init`'d clone of this repository):**
+
+| Date | Ignore mode | Median | Notes |
+|---|---|---|---|
+| 2026-10-26 | DMC rules (clone with `website/.gitignore` moved into `.dmcignore`) | 134 ms (8 runs) | 165 ms first run; about 294 ms when it also closed a missed Stop; Stop 174 ms |
+| 2026-10-27 | Git mode (fresh clone at `3cd2763` as is, `website/.gitignore` in place, plus `website/node_modules`, `dist` and `.astro`) | 176 ms (10 runs) | range 174–179 ms; Stop 216 ms |
+
+Process startup (`dmc --version`) is about 9 ms. Git mode adds about 40 ms: begin runs git for
+detection, the file list and the ignore sources (about nine short git processes in all).
 
 ### `dmc hooks install|uninstall|status --agent <agent> [--scope …] [--apply]`
 

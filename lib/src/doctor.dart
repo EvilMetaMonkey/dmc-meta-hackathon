@@ -6,6 +6,7 @@ import 'checkpoint_repository.dart';
 import 'checkpoint_operation_repository.dart';
 import 'checkpoint_operation_models.dart';
 import 'database.dart';
+import 'ignore.dart';
 import 'snapshot_store.dart';
 import 'workspace.dart';
 import 'watcher_control.dart';
@@ -186,6 +187,8 @@ Future<bool> runDoctor({String? basePath, String? homePath}) async {
     print('Watcher errors: ${watcherErrors ?? {}}');
     print('Excluded paths: ${health['exclusions'] ?? {}}');
   }
+  final ignorePolicy = await describeIgnorePolicy(paths.rootPath);
+  print('Ignore policy: ${ignorePolicy.text}');
   print('DB access: ok');
   print('Database integrity: ${databaseCheck.join(', ')}');
   print('Missing snapshot files: ${missingSnapshotFiles.length}');
@@ -203,6 +206,7 @@ Future<bool> runDoctor({String? basePath, String? homePath}) async {
 
   final hasIssues =
       interrupted ||
+      !ignorePolicy.ok ||
       (watcherErrors?.isNotEmpty ?? false) ||
       missingSnapshotFiles.isNotEmpty ||
       orphanedSnapshotFiles.isNotEmpty ||

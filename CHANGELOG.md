@@ -9,6 +9,11 @@
 - Fix `dmc hooks uninstall` to restore the config file's original bytes: it drops a `hooks` object it emptied, keeps the file's layout and final newline, and deletes a file it left empty.
 - Fix agent-hook close events so that a turn ID must match the active checkpoint's turn. A late async Muse Interrupt no longer closes the next turn's checkpoint.
 - Fix an intermittent `dart test` failure: agent hook fixtures now resolve from the package root rather than the cwd.
+- Add Git-compatible ignore handling. Inside a Git work tree, Git decides what is ignored: the protected file list is `git ls-files --cached --others --exclude-standard`, so nested `.gitignore` files, negation, character classes, `.git/info/exclude`, `core.excludesFile` and tracked files that match a pattern all behave as in Git. DMC's default directories, `.dmcignore` (still the documented subset) and the link and size rules apply on top; submodules and nested repositories are excluded (`nested_repository`). Outside Git, the subset parser and its refusals are unchanged. Previously any workspace with a nested `.gitignore`, `!` or `[...]` (including this repository) could not be checkpointed.
+- Git mode never falls back silently: a Git work tree without a usable git records `git_unavailable` (or `git_failed`) at begin, and close fails with it while the checkpoint stays open.
+- The policy fingerprint in Git mode (version 2) covers the mode and every ignore source Git reads; editing any of them mid-turn fails close with `policy_changed`. `.gitignore` files that tools write into directories Git already ignores (pytest, venv) do not count.
+- Checkpoint restore and redo refuse Git-ignored targets with a `git_ignored` conflict, so they never create, overwrite or delete a Git-ignored file. The watcher checks Git once per drain (`git check-ignore --stdin -z`). `status` and `doctor` print the active ignore policy.
+- CI runs `dart test --concurrency=1`, the documented gate, which fixes the older-test `Directory.current` race.
 
 ## 1.1.0-dev.5.1 — Unreleased
 

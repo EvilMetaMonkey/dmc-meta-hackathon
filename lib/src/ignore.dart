@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'git_ignore.dart';
 import 'workspace.dart';
 
 /// Directories to ignore when watching for file changes.
@@ -172,21 +173,75 @@ class IgnoreRule {
   }
 }
 
+/// What a workspace ignores. Inside a Git work tree, [git] decides first and
+/// [rules] (DMC's default directories and `.dmcignore`) apply on top.
+/// Elsewhere [git] is null and [rules] also hold the root `.gitignore`
+/// subset.
+class IgnorePolicy {
+  final List<IgnoreRule> rules;
+  final GitWorkTree? git;
+
+  const IgnorePolicy(this.rules, {this.git});
+
+  bool get gitMode => git != null;
+
+  /// A one-line description for status and doctor.
+  String get description => git == null
+      ? 'dmc rules (not a Git work tree)'
+      : 'git (work tree ${git!.topLevel}, ${git!.executable})';
+}
+
+/// Load the ignore policy for [targetPath]. Throws [GitIgnoreException] when
+/// the workspace is inside a Git work tree but Git cannot be run.
+Future<IgnorePolicy> loadIgnorePolicy(
+  String targetPath, {
+  bool announce = true,
+  GitLocator? gitLocator,
+  Map<String, String>? environment,
+}) async {
+  final git = await GitWorkTree.detect(
+    targetPath,
+    locator: gitLocator,
+    environment: environment,
+  );
+  if (git == null) {
+    return IgnorePolicy(await loadIgnoreRules(targetPath, announce: announce));
+  }
+  if (announce) {
+    print('[DMC] Git decides what is ignored (work tree ${git.topLevel}).');
+  }
+  return IgnorePolicy(
+    await loadIgnoreRules(
+      targetPath,
+      announce: announce,
+      includeGitIgnore: false,
+    ),
+    git: git,
+  );
+}
+
+/// DMC's own rules: the default directories, the root `.gitignore` subset
+/// (unless [includeGitIgnore] is false, as in Git mode) and `.dmcignore`.
 Future<List<IgnoreRule>> loadIgnoreRules(
   String targetPath, {
   bool announce = true,
+  bool includeGitIgnore = true,
 }) async {
   final rules = [
     for (final ignoredDir in ignoredDirs)
       IgnoreRule.defaultDirectory(ignoredDir),
   ];
 
-  final gitRuleCount = await _loadRulesFromFile(
-    File(p.join(targetPath, gitIgnoreFileName)),
-    rules,
-  );
-  if (announce && gitRuleCount > 0) {
-    print('[DMC] Loaded $gitRuleCount ignore rule(s) from $gitIgnoreFileName');
+  if (includeGitIgnore) {
+    final gitRuleCount = await _loadRulesFromFile(
+      File(p.join(targetPath, gitIgnoreFileName)),
+      rules,
+    );
+    if (announce && gitRuleCount > 0) {
+      print(
+        '[DMC] Loaded $gitRuleCount ignore rule(s) from $gitIgnoreFileName',
+      );
+    }
   }
 
   final userRuleCount = await _loadRulesFromFile(
@@ -222,4 +277,24 @@ Future<int> _loadRulesFromFile(File file, List<IgnoreRule> rules) async {
   }
 
   return ruleCount;
+}
+
+/// The ignore policy line shown by `status` and `doctor`. [ok] is false when
+/// checkpoints would refuse to start because the policy cannot be loaded.
+Future<({String text, bool ok})> describeIgnorePolicy(
+  String targetPath, {
+  GitLocator? gitLocator,
+}) async {
+  try {
+    final policy = await loadIgnorePolicy(
+      targetPath,
+      announce: false,
+      gitLocator: gitLocator,
+    );
+    return (text: policy.description, ok: true);
+  } on GitIgnoreException catch (error) {
+    return (text: 'unavailable (${error.code}): ${error.message}', ok: false);
+  } catch (error) {
+    return (text: 'invalid: $error', ok: false);
+  }
 }

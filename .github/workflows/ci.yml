@@ -20,7 +20,7 @@ jobs:
           sdk: '3.11.5'
       - run: dart pub get --enforce-lockfile
       - run: dart run tool/check_analyzer.dart
-      - run: dart test
+      - run: dart test --concurrency=1
       - run: dart test tool/haven_contract_test.dart --concurrency=1
       - run: dart build cli -o build/ci-dmc
       - if: runner.os != 'Windows'

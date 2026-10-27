@@ -6,6 +6,7 @@ import 'checkpoint_operation_repository.dart';
 import 'checkpoint_operation_models.dart';
 import 'daemon.dart';
 import 'database.dart';
+import 'ignore.dart';
 import 'workspace.dart';
 import 'watcher_control.dart';
 
@@ -77,6 +78,11 @@ Future<int> showStatus({
       ? readControlJson(paths, 'watcher-health.json')
       : null;
   print('Protection: ${live?['ready'] == true ? 'ready' : 'not ready'}');
+  if (dmcDirExists) {
+    print(
+      'Ignore policy: ${(await describeIgnorePolicy(paths.rootPath)).text}',
+    );
+  }
   if (live != null || health != null) {
     final state = live ?? health!;
     print('Last watcher state: ${state['phase']}');

@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'config.dart';
 import 'database.dart';
 import 'file_policy.dart';
+import 'git_ignore.dart';
 import 'ignore.dart';
 import 'snapshot_store.dart';
 import 'task.dart';
@@ -42,6 +43,10 @@ class DmcWatcher {
   final DmcDatabase database;
   final String snapshotsPath;
   final List<IgnoreRule> ignoreRules;
+
+  /// In Git mode, Git decides what is ignored before [ignoreRules] apply.
+  /// Events are checked in one `git check-ignore` batch per drain.
+  final GitWorkTree? git;
   final BurstAssigner burstAssigner;
   final int Function() _nowMilliseconds;
   final int maxFileSizeBytes;
@@ -70,6 +75,7 @@ class DmcWatcher {
     required this.database,
     required this.snapshotsPath,
     required this.ignoreRules,
+    this.git,
     required this.maxFileSizeBytes,
     String? Function()? activeTaskNameProvider,
     BurstAssigner? burstAssigner,
@@ -158,6 +164,7 @@ class DmcWatcher {
       final scan = await scanWorkspace(
         _paths,
         ignoreRules,
+        git: git,
         onDirectory: _subscribe,
       );
       _scanErrors = scan.errors;
@@ -177,14 +184,22 @@ class DmcWatcher {
           .getAllSnapshotRecords()
           .map((row) => row.filePath)
           .toSet();
-      for (final relative in historicalPaths) {
-        final path = p.join(targetPath, relative);
-        if (!shouldTrackFile(path)) continue;
-        if (FileSystemEntity.typeSync(path, followLinks: false) ==
-                FileSystemEntityType.notFound &&
-            scan.errors.isEmpty) {
-          await captureFileNow(path);
-        }
+      final missing = [
+        for (final relative in historicalPaths)
+          if (shouldTrackFile(p.join(targetPath, relative)) &&
+              FileSystemEntity.typeSync(
+                    p.join(targetPath, relative),
+                    followLinks: false,
+                  ) ==
+                  FileSystemEntityType.notFound)
+            relative,
+      ];
+      final gitIgnored = git == null || missing.isEmpty
+          ? const <String>{}
+          : await git!.ignoredAmong(missing);
+      for (final relative in missing) {
+        if (gitIgnored.contains(relative)) continue;
+        await captureFileNow(p.join(targetPath, relative));
       }
       for (final directory in _subscriptions.keys.toList()) {
         if (!scan.directories.contains(directory)) {
@@ -257,12 +272,31 @@ class DmcWatcher {
   Future<void> _drainPending() async {
     final paths = _queuedPaths.toList();
     _queuedPaths.clear();
+    final files = <String>[];
     for (final path in paths) {
       _pendingBackups.remove(path)?.cancel();
       if (FileSystemEntity.typeSync(path, followLinks: false) !=
           FileSystemEntityType.directory) {
-        await captureFileNow(path);
+        files.add(path);
       }
+    }
+    var gitIgnored = const <String>{};
+    if (git != null && files.isNotEmpty) {
+      try {
+        gitIgnored = await git!.ignoredAmong([
+          for (final path in files) p.relative(path, from: targetPath),
+        ]);
+        _scanErrors.remove('git');
+      } on GitIgnoreException catch (error) {
+        // Never capture or infer deletions without Git's verdict.
+        _scanErrors['git'] = error.message;
+        _publishHealth();
+        return;
+      }
+    }
+    for (final path in files) {
+      if (gitIgnored.contains(p.relative(path, from: targetPath))) continue;
+      await captureFileNow(path);
     }
     _publishHealth();
   }
@@ -408,12 +442,13 @@ Future<int> watchDmc({String? basePath, Future<void>? keepAlive}) async {
     writeControlJson(paths, 'daemon.pid', {'pid': pid});
     db.initialize();
     final config = await loadDmcConfig(basePath: paths.rootPath);
-    final rules = await loadIgnoreRules(paths.rootPath);
+    final policy = await loadIgnorePolicy(paths.rootPath);
     watcher = DmcWatcher(
       targetPath: paths.rootPath,
       database: db,
       snapshotsPath: paths.snapshotsPath,
-      ignoreRules: rules,
+      ignoreRules: policy.rules,
+      git: policy.git,
       maxFileSizeBytes: config.maxFileSizeBytes,
       activeTaskNameProvider: () =>
           readActiveTaskSync(basePath: paths.rootPath),

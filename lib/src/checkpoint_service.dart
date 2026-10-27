@@ -11,6 +11,7 @@ import 'checkpoint_repository.dart';
 import 'config.dart';
 import 'database.dart';
 import 'file_policy.dart';
+import 'git_ignore.dart';
 import 'ignore.dart';
 import 'machine_output.dart';
 import 'snapshot_store.dart';
@@ -38,9 +39,13 @@ class CheckpointService {
   final int Function() _now;
   final String Function(int timestamp) _idGenerator;
 
+  /// Finds Git for Git-mode ignore handling; tests can make it fail.
+  final GitLocator? gitLocator;
+
   CheckpointService({
     this.basePath,
     this.homePath,
+    this.gitLocator,
     SnapshotStoreFactory? storeFactory,
     int Function()? now,
     String Function(int timestamp)? idGenerator,
@@ -115,11 +120,7 @@ class CheckpointService {
 
       final createdAt = _now();
       checkpointId = _idGenerator(createdAt);
-      late final ({
-        DmcConfig config,
-        List<IgnoreRule> rules,
-        String fingerprint,
-      })
+      late final ({DmcConfig config, IgnorePolicy ignore, String fingerprint})
       policy;
       try {
         policy = await _loadPolicy(paths);
@@ -138,7 +139,7 @@ class CheckpointService {
             checkpointId: checkpointId,
             phase: 'begin',
             filePath: null,
-            code: 'policy_invalid',
+            code: error is GitIgnoreException ? error.code : 'policy_invalid',
             message: error.toString(),
             fatal: true,
           ),
@@ -169,7 +170,7 @@ class CheckpointService {
       final store = _storeFactory(database, paths.snapshotsPath);
       final issues = <CheckpointIssue>[];
       final before = <String, _CapturedFile>{};
-      final scan = await scanWorkspace(paths, policy.rules);
+      final scan = await scanWorkspacePolicy(paths, policy.ignore);
       _recordScanIssues(repository, checkpointId, 'begin', scan, issues);
       if (scan.errors.isEmpty) {
         for (final filePath in [...scan.files]..sort()) {
@@ -200,7 +201,7 @@ class CheckpointService {
         }
         await _verifyCurrentManifest(
           paths: paths,
-          rules: policy.rules,
+          ignore: policy.ignore,
           config: policy.config,
           store: store,
           expected: before,
@@ -374,7 +375,7 @@ class CheckpointService {
               ),
         };
         final after = <String, _CapturedFile>{};
-        final scan = await scanWorkspace(paths, policy.rules);
+        final scan = await scanWorkspacePolicy(paths, policy.ignore);
         _recordScanIssues(repository, checkpointId, 'close', scan, issues);
         if (scan.errors.isEmpty) {
           for (final filePath in [...scan.files]..sort()) {
@@ -446,7 +447,7 @@ class CheckpointService {
           }
           await _verifyCurrentManifest(
             paths: paths,
-            rules: policy.rules,
+            ignore: policy.ignore,
             config: policy.config,
             store: store,
             expected: after,
@@ -501,6 +502,9 @@ class CheckpointService {
           'checkpoint_busy',
           'Another checkpoint command is running in this workspace.',
         );
+      }
+      if (error is GitIgnoreException) {
+        return machineFailure(command, 1, error.code, error.message);
       }
       return machineFailure(command, 1, 'close_failed', error.toString());
     } finally {
@@ -692,29 +696,50 @@ class CheckpointService {
     }
   }
 
-  Future<({DmcConfig config, List<IgnoreRule> rules, String fingerprint})>
+  /// The configuration and ignore policy, with a fingerprint that close
+  /// compares against begin. Outside Git it is unchanged from schema 1
+  /// (version 1). In Git mode (version 2) it also covers the mode and every
+  /// ignore source Git reads: the effective .gitignore files, info/exclude
+  /// and core.excludesFile.
+  Future<({DmcConfig config, IgnorePolicy ignore, String fingerprint})>
   _loadPolicy(DmcPaths paths) async {
     final config = await loadDmcConfig(
       basePath: paths.rootPath,
       homePath: homePath,
     );
-    final rules = await loadIgnoreRules(paths.rootPath, announce: false);
-    final policy = jsonEncode({
-      'version': 1,
-      'maxFileSizeBytes': config.maxFileSizeBytes,
-      'rules': [
-        for (final rule in rules)
-          {
-            'pattern': rule.pattern,
-            'directoryOnly': rule.directoryOnly,
-            'matchAnywhere': rule.matchAnywhere,
-            'hasWildcard': rule.hasWildcard,
-          },
-      ],
-    });
+    final ignore = await loadIgnorePolicy(
+      paths.rootPath,
+      announce: false,
+      gitLocator: gitLocator,
+    );
+    final rules = [
+      for (final rule in ignore.rules)
+        {
+          'pattern': rule.pattern,
+          'directoryOnly': rule.directoryOnly,
+          'matchAnywhere': rule.matchAnywhere,
+          'hasWildcard': rule.hasWildcard,
+        },
+    ];
+    final git = ignore.git;
+    final policy = jsonEncode(
+      git == null
+          ? {
+              'version': 1,
+              'maxFileSizeBytes': config.maxFileSizeBytes,
+              'rules': rules,
+            }
+          : {
+              'version': 2,
+              'mode': 'git',
+              'maxFileSizeBytes': config.maxFileSizeBytes,
+              'rules': rules,
+              'gitSources': await git.ignoreSources(await git.list()),
+            },
+    );
     return (
       config: config,
-      rules: rules,
+      ignore: ignore,
       fingerprint: sha256.convert(utf8.encode(policy)).toString(),
     );
   }
@@ -833,7 +858,7 @@ class CheckpointService {
 
   Future<void> _verifyCurrentManifest({
     required DmcPaths paths,
-    required List<IgnoreRule> rules,
+    required IgnorePolicy ignore,
     required DmcConfig config,
     required SnapshotStore store,
     required Map<String, _CapturedFile> expected,
@@ -843,7 +868,7 @@ class CheckpointService {
     required CheckpointRepository repository,
     required List<CheckpointIssue> issues,
   }) async {
-    final verification = await scanWorkspace(paths, rules);
+    final verification = await scanWorkspacePolicy(paths, ignore);
     _recordScanIssues(repository, checkpointId, phase, verification, issues);
     if (verification.errors.isNotEmpty) return;
     final actual = <String, _CapturedFile>{};
@@ -943,10 +968,17 @@ class CheckpointService {
         checkpointId: checkpointId,
         phase: phase,
         filePath: entry.key,
-        code: entry.value == 'symlink' ? 'symlink' : 'ignored_path',
-        message: entry.value == 'symlink'
-            ? 'Symlinks are excluded from checkpoint protection.'
-            : 'Path is excluded by checkpoint ignore policy.',
+        code: switch (entry.value) {
+          'symlink' => 'symlink',
+          nestedRepositoryExclusion => 'nested_repository',
+          _ => 'ignored_path',
+        },
+        message: switch (entry.value) {
+          'symlink' => 'Symlinks are excluded from checkpoint protection.',
+          nestedRepositoryExclusion =>
+            'Submodules and nested repositories are excluded from checkpoint protection.',
+          _ => 'Path is excluded by checkpoint ignore policy.',
+        },
         fatal: false,
       );
     }
@@ -959,6 +991,8 @@ class CheckpointService {
         filePath: entry.key == '.' ? null : entry.key,
         code: entry.value.contains('Nested .gitignore')
             ? 'nested_ignore'
+            : entry.value.startsWith(gitScanErrorPrefix)
+            ? 'git_failed'
             : 'scan_failed',
         message: entry.value,
         fatal: true,
