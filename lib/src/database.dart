@@ -11,7 +11,7 @@ bool isTombstoneSnapshot({required String hash, required String snapshotPath}) {
 
 /// Database manager for DMC's SQLite storage
 class DmcDatabase {
-  static const schemaVersion = 4;
+  static const schemaVersion = 5;
   final String dbPath;
   Database? _db;
   Directory? _readCopy;
@@ -94,6 +94,11 @@ class DmcDatabase {
         if (version < 4) {
           _migrateToVersion4();
           db.execute('PRAGMA user_version = 4');
+          version = 4;
+        }
+        if (version < 5) {
+          _migrateToVersion5();
+          db.execute('PRAGMA user_version = 5');
         }
       });
       _db!.execute('PRAGMA journal_mode = WAL');
@@ -340,6 +345,30 @@ class DmcDatabase {
     ]) {
       if (existing.contains(column.split(' ').first)) continue;
       _db!.execute('ALTER TABLE checkpoints ADD COLUMN $column');
+    }
+  }
+
+  /// Ignore-policy drift during a checkpoint: the close-time policy
+  /// fingerprint, and per-file scope changes. Nullable and additive; existing
+  /// rows are not rewritten.
+  void _migrateToVersion5() {
+    final checkpointColumns = {
+      for (final row in _db!.select('PRAGMA table_info(checkpoints)'))
+        row['name'] as String,
+    };
+    if (!checkpointColumns.contains('close_policy_fingerprint')) {
+      _db!.execute(
+        'ALTER TABLE checkpoints ADD COLUMN close_policy_fingerprint TEXT',
+      );
+    }
+    final fileColumns = {
+      for (final row in _db!.select('PRAGMA table_info(checkpoint_files)'))
+        row['name'] as String,
+    };
+    if (!fileColumns.contains('scope_change')) {
+      _db!.execute(
+        "ALTER TABLE checkpoint_files ADD COLUMN scope_change TEXT CHECK(scope_change IS NULL OR scope_change IN ('left_scope', 'entered_scope'))",
+      );
     }
   }
 

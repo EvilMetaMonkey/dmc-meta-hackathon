@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-27 by Claude (Git ignore session)
+Last updated: 2026-10-27 by Claude (export and policy-drift session)
 
 ## Done
 
@@ -106,6 +106,30 @@ Last updated: 2026-10-27 by Claude (Git ignore session)
   push and pull_request runs for `408f28b` (and for `3cd2763`); Windows ran all 10 Git-mode tests.
 - Prompt delay in Git mode, against that clone: `dmc agent-hook claude-code UserPromptSubmit`
   median 176 ms over 10 runs (174–179 ms); Stop 216 ms. Was 134 ms with DMC's own rules.
+- **Ignore-policy drift handled per file** (Mike chose per-file handling; branch
+  `hackathon/export-drift`). When the ignore policy or config changes between begin and close,
+  close succeeds with a non-fatal `policy_changed` warning. Both fingerprints are recorded, and
+  files whose protection changed are `left_scope` (before state kept, no after state) or
+  `entered_scope` (no before state). Restore and redo list them under `skipped` and never write
+  them; redo of a changed `entered_scope` file is a `workspace_drift` conflict. Schema 5 adds two
+  nullable columns without rewriting rows. This fixes the Broken item "a turn in which the agent
+  edits an ignore source cannot close". Verified by 6 tests in `test/policy_drift_test.dart`, a
+  v4 → v5 migration test, and an end-to-end run with the compiled bundle: a real `claude -p` turn
+  (hooks installed) deleted `*.log` and added `notes.txt` in `.gitignore`. Close recorded
+  `debug.log` as entered_scope and `notes.txt` as left_scope; the restore preview listed both
+  under Skipped; apply restored `.gitignore` and `app.txt` and left both skipped files
+  byte-identical (same SHA-256).
+- **`dmc checkpoint export <id> --to <dir> [--state before|after]`** (for bisect). Verified by 7
+  tests in `test/checkpoint_export_test.dart` (before/after, modified/created/deleted, modes, a
+  corrupted snapshot leaving nothing behind, refused targets including a link into the
+  workspace, an open checkpoint, left/entered_scope, CLI JSON and capabilities). In the
+  end-to-end run, diffing the before and after exports against the restored working copy showed
+  only the expected differences. On a clone of this repo at `b0b8040`: 121 files, 1,157,446
+  bytes (1.4 MB on disk), median 40 ms over 5 runs, identical to the working copy minus ignored
+  paths.
+- Gates for this branch: analyzer clean, `dart test --concurrency=1` 218 passed, Haven contract
+  tests 3 passed unchanged. PR #4 CI passed on ubuntu, macOS, macOS Intel and Windows in both the
+  push and pull_request runs for `c7bb435` (and the push run for `b0b8040`).
 
 ## In progress
 
@@ -113,15 +137,20 @@ Last updated: 2026-10-27 by Claude (Git ignore session)
 
 ## Broken
 
-- A turn in which the agent edits an ignore source (any effective `.gitignore`, `info/exclude`,
-  `core.excludesFile`, `.dmcignore` or the config) cannot close: close records `policy_changed`
-  (fatal), the checkpoint becomes `invalid`, and checkpoint restore refuses it, so that turn has
-  no one-step rollback. The begin snapshots stay in the vault. This is the existing semantics,
-  kept on purpose; changing it needs Mike's decision.
+- A `left_scope` file the agent changed after ignoring it keeps the agent's edits after a
+  restore: its after state is never captured, so a restore cannot undo them. This is by design
+  (restore never touches it). The before snapshot is in the vault, and `checkpoint export
+  --state before` recovers it.
 - Git ignores are checked by checkpoint begin/close, checkpoint restore/redo, `snap` and the
   watcher. Not by legacy file restores (`dmc undo|restore|redo <file>`, `--burst`), which never
   consulted ignore rules, and not by `checkpoint recover --resume|--rollback`, which finishes an
   already-journaled operation.
+- Windows CI flake in an older test, not caused by this branch (which does not touch the
+  watcher): `test/watcher_hardening_test.dart:155` ("real create, rename, directory move and atomic
+  replacement are captured") failed once with `PathAccessException ... renamed.txt ... errno = 32`
+  (the test deleted a file the watcher still had open). Seen on run 40540474040 (push, `8087f08`,
+  a STATUS-only commit); the pull_request run of the same commit passed, and rerunning the failed
+  job passed. Not fixed; a retry around the delete in the test would likely cure it.
 - Git mode on Windows is verified only by CI (`windows-latest`), not on a real Windows machine.
 - Not verified: whether Claude Code fires `Stop` when a turn is cancelled with Esc (dmc closes it
   on the next prompt either way); whether Muse trust of a parent folder covers the folders inside
@@ -131,16 +160,21 @@ Last updated: 2026-10-27 by Claude (Git ignore session)
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. A new deterministic `dmc checkpoint export <id> --to <dir>` command, for bisect.
-2. A worktree check, and the Doc companion skeleton: plain CLI, secret redaction, and one model
+1. A worktree check, and the Doc companion skeleton: plain CLI, secret redaction, and one model
    client for Meta Model API and a local Glimmer.
-3. Then, per the spec's schedule: lesson library (Oct 29–30), bisect (Oct 31), push-to-talk voice
+2. Then, per the spec's schedule: lesson library (Oct 29–30), bisect (Oct 31; build on
+   `checkpoint export`, and set up ignored dependencies such as `node_modules` and `.dart_tool`
+   in each export, because export holds only protected files), push-to-talk voice
    (Nov 1), parallel timelines (Nov 1–2), demo and README (Nov 3), submit (Nov 4).
 
 ## Session log
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
 
+- 2026-10-27 · Claude · Export and policy drift (branch `hackathon/export-drift`): per-file
+  handling of ignore-policy drift (schema 5, `left_scope`/`entered_scope`, `skipped` in plans)
+  and `dmc checkpoint export`. Verified with tests, a real Claude Code turn that edited
+  `.gitignore`, and an export of a clone of this repo (121 files, 40 ms). Nothing left half-done.
 - 2026-10-27 · Claude · Git ignore session (branch `hackathon/git-ignore`): CI now runs
   `dart test --concurrency=1`; added Git-mode ignore handling (Git's file list, no silent
   fallback, fingerprinted ignore sources, Git-ignored restore/redo refusal, batched watcher

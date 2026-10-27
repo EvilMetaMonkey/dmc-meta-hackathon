@@ -185,6 +185,26 @@ class IgnorePolicy {
 
   bool get gitMode => git != null;
 
+  /// The subset of [relativePaths] (native, relative to the workspace) that
+  /// this policy excludes: by DMC's rules, or, in Git mode, because Git
+  /// ignores them. Paths need not exist. One Git process at most.
+  Future<Set<String>> outOfScope(Iterable<String> relativePaths) async {
+    final paths = relativePaths.toList();
+    if (paths.isEmpty) return const {};
+    final excluded = {
+      for (final path in paths)
+        if (rules.any((rule) => rule.matches(path))) path,
+    };
+    if (git != null) {
+      excluded.addAll(
+        await git!.ignoredAmong(
+          paths.where((path) => !excluded.contains(path)),
+        ),
+      );
+    }
+    return excluded;
+  }
+
   /// A one-line description for status and doctor.
   String get description => git == null
       ? 'dmc rules (not a Git work tree)'

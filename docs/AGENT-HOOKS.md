@@ -230,7 +230,7 @@ The rest of this page describes what dmc builds on these facts.
 - **Never blocks the agent:** the command always exits 0, prints nothing on stdout, and sends
   warnings to stderr.
 
-Agent context is stored per checkpoint (schema 4): `agent`, `sessionId`, `turnId`,
+Agent context is stored per checkpoint (schema 4 and later): `agent`, `sessionId`, `turnId`,
 `transcriptPath` and, at close, `transcriptBytes` and `transcriptSha256` of the transcript
 bytes read at that moment. For Muse, a missing `transcript_path` (always, in 1.4.13) falls back
 to the session's `session.jsonl`, found by session ID under `$XDG_DATA_HOME` or

@@ -35,9 +35,20 @@ dmc checkpoint diff <checkpoint-id>
 ```
 
 `diff` classifies each path as `modified`, `created`, or `deleted`. A rename
-appears as one deletion plus one creation. Between begin and close, the policy
-is re-checked: if ignore rules or config changed, the close is invalidated
-instead of pretending the interval is intact.
+appears as one deletion plus one creation.
+
+Agents often edit `.gitignore`. If the ignore rules (any `.gitignore`,
+`.dmcignore`) or the config changed between begin and close, the close still
+succeeds with a `policy_changed` warning, and the new rules decide what is
+protected. Files whose protection changed are marked per file:
+
+- **left scope** — protected at begin, ignored at close. Its before-state is
+  kept, but restore and redo never touch it.
+- **entered scope** — ignored at begin, protected at close. It has no
+  before-state, so restore never deletes or overwrites it.
+
+The restore and redo previews list both under **Skipped**. Everything else,
+including the edited ignore files themselves, restores as usual.
 
 ## Lifecycle
 
@@ -47,7 +58,7 @@ instead of pretending the interval is intact.
 | `open` | Work may proceed; the after-state is pending |
 | `closing` | Close is verifying the after-state |
 | `closed` | Verified before/after manifest; ready to restore or redo |
-| `invalid` | Capture or policy verification failed; cannot restore |
+| `invalid` | Capture or verification failed; cannot restore |
 | `released` | Retention pins detached after an explicit release |
 
 Only `invalid`, `closed`, and `released` checkpoints allow a new begin.
@@ -62,6 +73,19 @@ dmc checkpoint show <checkpoint-id>      # manifest + operation history
 
 `show` includes the operation history, so an interrupted apply can be found
 even after a restart.
+
+## Export a checkpoint
+
+```sh
+dmc checkpoint export <checkpoint-id> --to /tmp/at-checkpoint            # after state
+dmc checkpoint export <checkpoint-id> --to /tmp/before --state before
+```
+
+Export writes the project as it was at a checkpoint to a new or empty folder
+outside the project, verifying every file's SHA-256 and restoring its mode. It
+never touches the working copy, and a failed export leaves nothing behind.
+Only files dmc protects are exported: ignored dependencies such as
+`node_modules` or build output are not.
 
 ## Retention
 

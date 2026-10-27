@@ -4,6 +4,30 @@ enum CheckpointFileKind { file, absent }
 
 enum CheckpointChangeKind { unchanged, modified, created, deleted }
 
+/// How a file's protection changed when the ignore policy changed between
+/// begin and close. Such files have a null change classification.
+enum CheckpointScopeChange {
+  /// In scope at begin, out of scope at close (newly ignored). The before
+  /// state is kept; there is no after state, and restore and redo skip it.
+  leftScope('left_scope'),
+
+  /// Out of scope at begin, in scope at close (newly un-ignored). There is no
+  /// before state (recorded as absent); restore never deletes or overwrites
+  /// it, and redo only confirms it still matches its after state.
+  enteredScope('entered_scope');
+
+  final String id;
+  const CheckpointScopeChange(this.id);
+
+  static CheckpointScopeChange? fromText(String? value) => value == null
+      ? null
+      : CheckpointScopeChange.values.firstWhere(
+          (scope) => scope.id == value,
+          orElse: () =>
+              throw FormatException('Unknown checkpoint scope change: $value'),
+        );
+}
+
 CheckpointStatus checkpointStatusFromText(String value) =>
     CheckpointStatus.values.firstWhere(
       (status) => status.name == value,
@@ -68,6 +92,11 @@ class CheckpointRecord {
   final int? closedAt;
   final int? releasedAt;
   final String policyFingerprint;
+
+  /// The policy fingerprint at close; differs from [policyFingerprint] when
+  /// the ignore policy changed during the checkpoint. Null before close and
+  /// for checkpoints closed before schema 5.
+  final String? closePolicyFingerprint;
   final int fatalErrorCount;
   final int exclusionCount;
   final CheckpointAgentContext? agent;
@@ -82,6 +111,7 @@ class CheckpointRecord {
     required this.closedAt,
     required this.releasedAt,
     required this.policyFingerprint,
+    this.closePolicyFingerprint,
     required this.fatalErrorCount,
     required this.exclusionCount,
     this.agent,
@@ -97,6 +127,7 @@ class CheckpointRecord {
     'closedAt': closedAt,
     'releasedAt': releasedAt,
     'policyFingerprint': policyFingerprint,
+    'closePolicyFingerprint': closePolicyFingerprint,
     'fatalErrorCount': fatalErrorCount,
     'exclusionCount': exclusionCount,
     'agent': agent?.toJson(),
@@ -115,6 +146,7 @@ class CheckpointFileRecord {
   final String? afterHash;
   final int? afterMode;
   final CheckpointChangeKind? changeKind;
+  final CheckpointScopeChange? scopeChange;
 
   const CheckpointFileRecord({
     required this.checkpointId,
@@ -128,6 +160,7 @@ class CheckpointFileRecord {
     required this.afterHash,
     required this.afterMode,
     required this.changeKind,
+    this.scopeChange,
   });
 
   Map<String, Object?> toJson() => {
@@ -147,6 +180,7 @@ class CheckpointFileRecord {
             'mode': afterMode,
           },
     'change': changeKind?.name,
+    'scope': scopeChange?.id,
   };
 }
 

@@ -51,10 +51,11 @@ All fields listed here are part of machine schema 1. Additive fields may appear 
 | `checkpoint recover` | `mode`, `operationId`, `operation`; a blocked recovery also includes `conflicts` |
 | `checkpoint recover --preview` | On a valid pending operation: `preview`, `applied`, `canRecover`, `mode`, `operationId`, `checkpointId`, `operation`, `actions`, `conflicts` |
 | `checkpoint release` | `checkpoint`, `issues` |
+| `checkpoint export` | `checkpointId`, `state` (`before`/`after`), `directory`, `fileCount`, `totalBytes`, `manifestSha256` |
 
-A checkpoint summary includes `id`, nullable `label`, `source`, `status`, `manifestVersion`, millisecond timestamps, `policyFingerprint`, `protectedFileCount`, `changedFileCount`, `exclusionCount`, `fatalErrorCount`, and `agent`. `agent` is additive and null unless an agent hook began the checkpoint; otherwise it holds `name`, `sessionId`, `turnId`, `transcriptPath`, `transcriptBytes` and `transcriptSha256` (the last two set at close). See `docs/AGENT-HOOKS.md`. Status values are `creating`, `open`, `closing`, `closed`, `invalid`, and `released`.
+A checkpoint summary includes `id`, nullable `label`, `source`, `status`, `manifestVersion`, millisecond timestamps, `policyFingerprint`, `closePolicyFingerprint`, `protectedFileCount`, `changedFileCount`, `exclusionCount`, `fatalErrorCount`, and `agent`. `closePolicyFingerprint` is additive: the policy fingerprint at close, null before close and for checkpoints closed by older builds. It differs from `policyFingerprint` when the ignore policy changed during the checkpoint, in which case close also returns a non-fatal `policy_changed` warning. `agent` is additive and null unless an agent hook began the checkpoint; otherwise it holds `name`, `sessionId`, `turnId`, `transcriptPath`, `transcriptBytes` and `transcriptSha256` (the last two set at close). See `docs/AGENT-HOOKS.md`. Status values are `creating`, `open`, `closing`, `closed`, `invalid`, and `released`.
 
-File entries contain a relative `path`, `before` and nullable `after` states, and a nullable `change`. State objects contain `kind`, nullable `snapshotId`, nullable SHA-256 `hash`, and nullable POSIX `mode`. Kind values are `file` and `absent`; change values are `unchanged`, `modified`, `created`, and `deleted`.
+File entries contain a relative `path`, `before` and nullable `after` states, a nullable `change`, and an additive nullable `scope`. State objects contain `kind`, nullable `snapshotId`, nullable SHA-256 `hash`, and nullable POSIX `mode`. Kind values are `file` and `absent`; change values are `unchanged`, `modified`, `created`, and `deleted`. `scope` is null unless the ignore policy changed during the checkpoint: `left_scope` (protected at begin, excluded at close: before state kept, `after` null) or `entered_scope` (excluded at begin, protected at close: `before.kind` is `absent` because no before state was recorded). Both have a null `change`. Haven must not offer to restore them itself; dmc's restore and redo list them under `skipped` and never write them.
 
 Operation summaries include `id`, `checkpointId`, `direction`, `status`, timestamps, and nullable `failureMessage`. Direction values are `restore` and `redo`. Status values are `planned`, `applying`, `completed`, `failed`, `rolling_back`, and `rolled_back`.
 
@@ -78,7 +79,7 @@ recheck it, then execute without `--preview`. Execution re-runs the shared
 preflight; preview is a point-in-time observation, not a reservation against
 external writers. See [recovery preview details](RECOVERY-PREVIEW.md).
 
-Restore actions contain `sequence`, relative `path`, expected state, and intended state. Conflicts and data errors contain `code`, `message`, and an optional relative `path`. Haven must decide whether a restore can be offered from `canApply`; it must not infer safety from an empty-looking action list alone.
+Restore actions contain `sequence`, relative `path`, expected state, and intended state. Conflicts and data errors contain `code`, `message`, and an optional relative `path`. The restore/redo plan also has an additive `skipped` list with the same shape (codes `left_scope` and `entered_scope`): files that are never written and do not block `canApply`. A redo whose `entered_scope` file changed since close reports it as a `workspace_drift` conflict instead. Haven must decide whether a restore can be offered from `canApply`; it must not infer safety from an empty-looking action list alone.
 
 ## Required lifecycle
 
