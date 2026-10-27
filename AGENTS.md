@@ -96,6 +96,14 @@ The most important product qualities are:
 - Do not move large amounts of logic unless necessary to support a feature cleanly.
 - Avoid introducing framework-like complexity into a small CLI tool.
 - New features should fit the existing repo-local `.dmc/` model.
+- **Doc is a separate program.** `doc/` is its own Dart package (`dmc_doc`, executable `doc`) with
+  its own pubspec, `bin/doc.dart`, `lib/src/`, analyzer run and tests (the root analyzer excludes
+  `doc/**`). Every model call lives in Doc; dmc never runs a model. Doc talks to dmc only by
+  running the dmc executable with `--json --schema-version 1` (found via `--dmc`, `DMC_BIN`, then
+  `PATH`, and checked with `capabilities`, skipping Apple's `/usr/bin/dmc`). It never reads
+  `.dmc/`, imports dmc's Dart code, or writes workspace files; it writes only `config.json` and
+  `usage.json` in its user config directory. Secrets are redacted before any hosted call. See
+  `doc/README.md`.
 
 ---
 
@@ -269,6 +277,10 @@ Use `docs/TESTER-READINESS-AUDIT.md` as the original audit and the Phase 2/3 han
 ---
 
 ## Common Commands
+- Doc (from `doc/`): `dart run bin/doc.dart models [--check] [--available]`,
+  `dart run bin/doc.dart summarize <checkpoint-id> [--local] [--show-prompt] [--role-provider summary=baseten]`,
+  `dart run bin/doc.dart usage`. Its gate: `dart pub get --enforce-lockfile`,
+  `dart analyze --fatal-infos`, `DMC_TEST_BIN=../build/dmc/bundle/bin/dmc dart test --concurrency=1`.
 - `dart run bin/dmc.dart init`
 - `dart run bin/dmc.dart watch`
 - `dart run bin/dmc.dart log`
