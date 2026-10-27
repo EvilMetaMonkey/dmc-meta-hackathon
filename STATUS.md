@@ -102,6 +102,8 @@ Last updated: 2026-10-27 by Claude (Git ignore session)
     `.yarn/releases`, and `node_modules`, `dist`, `.env`, `__pycache__`, `.venv`, `build` and
     `*.egg-info` were excluded. Close also succeeded after a mid-turn
     `api/.pytest_cache/.gitignore`.
+- PR #3 (`hackathon/git-ignore`): CI passed on ubuntu, macOS, macOS Intel and Windows in both the
+  push and pull_request runs for `408f28b` (and for `3cd2763`); Windows ran all 10 Git-mode tests.
 - Prompt delay in Git mode, against that clone: `dmc agent-hook claude-code UserPromptSubmit`
   median 176 ms over 10 runs (174–179 ms); Stop 216 ms. Was 134 ms with DMC's own rules.
 
