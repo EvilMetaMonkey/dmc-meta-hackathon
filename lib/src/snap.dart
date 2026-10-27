@@ -24,19 +24,20 @@ Future<int> takeManualSnapshot({String? basePath, String? homePath}) async {
   final db = DmcDatabase(paths.dbPath);
   try {
     db.initialize();
-    final ignoreRules = await loadIgnoreRules(paths.rootPath);
+    final policy = await loadIgnorePolicy(paths.rootPath);
     final watcher = DmcWatcher(
       targetPath: paths.rootPath,
       database: db,
       snapshotsPath: paths.snapshotsPath,
-      ignoreRules: ignoreRules,
+      ignoreRules: policy.rules,
+      git: policy.git,
       maxFileSizeBytes: config.maxFileSizeBytes,
       activeTaskNameProvider: () =>
           readActiveTaskSync(basePath: paths.rootPath),
     );
 
     var processedFiles = 0;
-    final scan = await scanWorkspace(paths, ignoreRules);
+    final scan = await scanWorkspacePolicy(paths, policy);
     var failedFiles = scan.errors.length;
     for (final error in scan.errors.entries) {
       print('[DMC] Scan failed ${error.key}: ${error.value}');
