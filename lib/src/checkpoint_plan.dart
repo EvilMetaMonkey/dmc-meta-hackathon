@@ -138,11 +138,16 @@ class CheckpointPlanner {
   final CheckpointRepository checkpoints;
   final CheckpointOperationRepository operations;
 
+  /// Checkpoint paths that Git ignores right now (Git mode only). Restore
+  /// and redo never create, overwrite or delete a Git-ignored file.
+  final Set<String> gitIgnored;
+
   const CheckpointPlanner({
     required this.paths,
     required this.database,
     required this.checkpoints,
     required this.operations,
+    this.gitIgnored = const {},
   });
 
   CheckpointPlan build(
@@ -222,6 +227,16 @@ class CheckpointPlanner {
           CheckpointPlanIssue(
             'unsafe_path',
             error.toString(),
+            path: file.filePath,
+          ),
+        );
+        continue;
+      }
+      if (gitIgnored.contains(file.filePath)) {
+        conflicts.add(
+          CheckpointPlanIssue(
+            'git_ignored',
+            'Git ignores this path now. Restore and redo never create, overwrite or delete a Git-ignored file.',
             path: file.filePath,
           ),
         );

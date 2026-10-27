@@ -11,6 +11,7 @@ import 'checkpoint_operation_repository.dart';
 import 'checkpoint_plan.dart';
 import 'checkpoint_repository.dart';
 import 'database.dart';
+import 'git_ignore.dart';
 import 'machine_output.dart';
 import 'snapshot_store.dart';
 import 'watcher_control.dart';
@@ -27,8 +28,12 @@ class CheckpointRestoreService {
   final OperationStepHook? beforeApplyStep;
   final OperationStepHook? beforeRollbackStep;
 
+  /// Finds Git for Git-mode ignore checks; tests can make it fail.
+  final GitLocator? gitLocator;
+
   CheckpointRestoreService({
     this.basePath,
+    this.gitLocator,
     int Function()? now,
     String Function(int timestamp)? idGenerator,
     this.beforeApplyStep,
@@ -92,13 +97,20 @@ class CheckpointRestoreService {
       database.initialize();
       final checkpoints = CheckpointRepository(database);
       final operations = CheckpointOperationRepository(database);
-      final planner = CheckpointPlanner(
+      // In a Git work tree, ask Git which checkpoint paths it ignores now.
+      final git = await GitWorkTree.detect(paths.rootPath, locator: gitLocator);
+      Future<CheckpointPlan> buildPlan() async => CheckpointPlanner(
         paths: paths,
         database: database,
         checkpoints: checkpoints,
         operations: operations,
-      );
-      var plan = planner.build(checkpointId, direction);
+        gitIgnored: git == null
+            ? const {}
+            : await git.ignoredAmong(
+                checkpoints.getFiles(checkpointId).map((file) => file.filePath),
+              ),
+      ).build(checkpointId, direction);
+      var plan = await buildPlan();
       if (!apply || !plan.canApply) {
         return _planResult(
           command,
@@ -171,7 +183,7 @@ class CheckpointRestoreService {
 
       // Capture writes only immutable vault data. Repeat the pure preflight
       // before committing the journal and before the first workspace mutation.
-      plan = planner.build(checkpointId, direction);
+      plan = await buildPlan();
       if (!plan.canApply) {
         return _planResult(command, plan, applied: false, mode: 'apply');
       }
@@ -285,6 +297,8 @@ class CheckpointRestoreService {
         'operation_busy',
         'Another checkpoint operation is running in this workspace.',
       );
+    } on GitIgnoreException catch (error) {
+      return machineFailure(command, 1, error.code, error.message);
     } catch (error) {
       return machineFailure(command, 1, 'operation_failed', error.toString());
     } finally {
