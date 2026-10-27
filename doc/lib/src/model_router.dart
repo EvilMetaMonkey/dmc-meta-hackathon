@@ -297,6 +297,15 @@ class ModelRouter {
       result.completionTokens,
       cost,
     );
+    if (result.content.isEmpty) {
+      throw ModelCallException(
+        ModelCallFailure.truncated,
+        provider.id,
+        result.finishReason == 'length'
+            ? '${provider.id}: $model used all $maxTokens completion tokens (mostly reasoning) before answering. Raise the token limit.'
+            : '${provider.id}: $model returned an empty answer (finish_reason ${result.finishReason}).',
+      );
+    }
     return RoleCallResult(result, cost, prepared.redactionCount);
   }
 }

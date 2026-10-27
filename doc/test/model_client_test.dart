@@ -62,6 +62,7 @@ void main() {
       expect(request.path, '/v1/chat/completions');
       expect(request.authorization, 'Bearer test-key-123456');
       expect(request.body!['max_tokens'], 32);
+      expect(request.body!['reasoning_effort'], 'low');
     },
   );
 

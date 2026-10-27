@@ -11,6 +11,9 @@ import 'model_router.dart';
 import 'summarize.dart';
 import 'usage.dart';
 
+/// Room for reasoning plus a 2-3 sentence answer.
+const int summaryMaxTokens = 1500;
+
 const String docUsage = '''
 Doc: the AI companion for dmc. Doc reads dmc only through its JSON interface
 and never writes workspace files.
@@ -224,7 +227,8 @@ Future<int> _models(_Context context) async {
           provider,
           entry.value,
           const [ChatMessage('user', 'Reply with the single word: ok')],
-          maxTokens: provider.id == 'meta' ? 256 : 32,
+          // Muse Spark reasons before answering, even for "ok".
+          maxTokens: provider.hosted ? 600 : 64,
         );
         out.writeln(
           '${label}ok  ${result.result.latency.inMilliseconds} ms  '
@@ -299,7 +303,11 @@ Future<int> _summarize(_Context context) async {
   final messages = summaryMessages(show, diff);
 
   if (args['show-prompt'] as bool) {
-    final prepared = context.router.prepare('summary', messages);
+    final prepared = context.router.prepare(
+      'summary',
+      messages,
+      maxTokens: summaryMaxTokens,
+    );
     context.out
       ..writeln(
         'Would send to ${prepared.route.provider.id} (${prepared.route.model}) at '
@@ -312,7 +320,11 @@ Future<int> _summarize(_Context context) async {
 
   final route = context.router.resolve('summary');
   try {
-    final call = await context.router.call('summary', messages);
+    final call = await context.router.call(
+      'summary',
+      messages,
+      maxTokens: summaryMaxTokens,
+    );
     final result = call.result;
     context.out
       ..writeln(result.content)

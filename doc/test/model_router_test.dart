@@ -246,6 +246,50 @@ void main() {
     expect(meta.requests, isEmpty);
   });
 
+  test(
+    'an answer cut off by the token limit is explained and billed',
+    () async {
+      final baseten = await FakeProvider.start([
+        const FakeReply(200, {
+          'choices': [
+            {
+              'message': {
+                'role': 'assistant',
+                'content': null,
+                'reasoning_content': 'hmm',
+              },
+              'finish_reason': 'length',
+            },
+          ],
+          'usage': {'prompt_tokens': 100, 'completion_tokens': 32},
+        }),
+      ]);
+      final meta = await FakeProvider.start([FakeReply.chat('never')]);
+      addTearDown(baseten.close);
+      addTearDown(meta.close);
+      await expectLater(
+        router(
+          config(
+            meta: meta.baseUrl,
+            baseten: baseten.baseUrl,
+            local: await closedBaseUrl(),
+          ),
+        ).call('workhorse', prompt, maxTokens: 32),
+        throwsA(
+          isA<ModelCallException>()
+              .having((e) => e.kind, 'kind', ModelCallFailure.truncated)
+              .having(
+                (e) => e.message,
+                'message',
+                contains('used all 32 completion tokens'),
+              ),
+        ),
+      );
+      expect(usage.forProvider('baseten').completionTokens, 32);
+      expect(meta.requests, isEmpty);
+    },
+  );
+
   test('prompts are redacted before they are sent', () async {
     final baseten = await FakeProvider.start([FakeReply.chat('ok')]);
     addTearDown(baseten.close);

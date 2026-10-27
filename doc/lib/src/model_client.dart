@@ -25,6 +25,9 @@ class ChatResult {
   final Duration latency;
   final int attempts;
 
+  /// The provider's finish reason, for example `stop` or `length`.
+  final String? finishReason;
+
   const ChatResult({
     required this.content,
     required this.provider,
@@ -33,6 +36,7 @@ class ChatResult {
     required this.completionTokens,
     required this.latency,
     required this.attempts,
+    this.finishReason,
   });
 }
 
@@ -42,6 +46,10 @@ enum ModelCallFailure {
   timeout,
   http,
   badResponse,
+
+  /// The model stopped (token limit) before writing an answer, for example
+  /// after spending every completion token on reasoning.
+  truncated,
   missingKey,
   budgetExceeded,
   refused,
@@ -71,11 +79,16 @@ class ModelCallException implements Exception {
   String toString() => message;
 }
 
+/// Providers whose models always reason, so `reasoning_effort` is sent.
+const Set<String> reasoningProviders = {'meta', 'baseten'};
+
 /// The JSON body for a chat call, following each provider's rules.
 ///
 /// meta (Muse Spark, Muse Wonder): always `reasoning_effort` (never "none")
 /// and `max_completion_tokens`; never `stop`, `n`, `logit_bias`, penalties,
-/// `max_tokens` or a temperature. Other providers get `max_tokens`.
+/// `max_tokens` or a temperature. baseten (Muse Spark Open, which also
+/// always reasons) gets `reasoning_effort` and `max_tokens`; local gets
+/// `max_tokens` only.
 Map<String, Object?> chatRequestBody({
   required ProviderConfig provider,
   required String model,
@@ -85,10 +98,11 @@ Map<String, Object?> chatRequestBody({
 }) => {
   'model': model,
   'messages': [for (final message in messages) message.toJson()],
-  if (provider.id == 'meta') ...{
+  if (reasoningProviders.contains(provider.id))
     'reasoning_effort': reasoningEffort == 'none' ? 'low' : reasoningEffort,
-    'max_completion_tokens': maxTokens,
-  } else
+  if (provider.id == 'meta')
+    'max_completion_tokens': maxTokens
+  else
     'max_tokens': maxTokens,
 };
 
@@ -293,17 +307,22 @@ class ChatClient {
         choices is List && choices.isNotEmpty && choices.first is Map
         ? (choices.first as Map)['message']
         : null;
-    final content = message is Map ? message['content'] : null;
-    if (content is! String) {
+    if (message is! Map) {
       throw ModelCallException(
         ModelCallFailure.badResponse,
         provider.id,
-        '${provider.id}: the response had no message content',
+        '${provider.id}: the response had no message',
       );
     }
+    // Reasoning models may stop before writing any content; the caller
+    // decides what to do with an empty answer (its tokens were billed).
+    final content = message['content'];
     final usage = json['usage'] is Map ? json['usage'] as Map : const {};
     return ChatResult(
-      content: content.trim(),
+      content: content is String ? content.trim() : '',
+      finishReason: (choices as List).first is Map
+          ? ((choices.first as Map)['finish_reason'] as String?)
+          : null,
       provider: provider.id,
       model: json['model'] as String? ?? model,
       promptTokens: (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
