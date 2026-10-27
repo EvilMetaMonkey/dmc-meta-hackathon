@@ -169,6 +169,7 @@ void main() {
       ..createSync(recursive: true)
       ..writeAsStringSync(jsonEncode(foreign));
     expect((await hooks('install', 'claude-code', apply: true)).code, 0);
+    expect(claudeLocal().readAsStringSync(), isNot(contains('\n')));
 
     final preview = await hooks('uninstall', 'claude-code');
     expect(preview.code, 0);
@@ -179,7 +180,7 @@ void main() {
     expect(read(claudeLocal()), isNot(foreign));
 
     expect((await hooks('uninstall', 'claude-code', apply: true)).code, 0);
-    expect(read(claudeLocal()), foreign);
+    expect(claudeLocal().readAsStringSync(), jsonEncode(foreign));
 
     final nothing = await hooks('uninstall', 'claude-code', apply: true);
     expect(nothing.code, 0);
@@ -190,6 +191,32 @@ void main() {
     expect(status.code, 1);
     expect(status.output, contains('Stop: missing'));
   });
+
+  test(
+    'uninstall restores exact bytes or removes a file dmc created',
+    () async {
+      // Muse Code writes settings with a two-space indent and no final newline.
+      const original =
+          '{\n  "schema_version": 1,\n  "provider": "meta",\n  "model": "m"\n}';
+      museUser()
+        ..createSync(recursive: true)
+        ..writeAsStringSync(original);
+      expect((await hooks('install', 'muse-code', apply: true)).code, 0);
+      expect(read(museUser()), contains('hooks'));
+      expect(museUser().readAsStringSync(), isNot(endsWith('\n')));
+      expect((await hooks('uninstall', 'muse-code', apply: true)).code, 0);
+      expect(museUser().readAsStringSync(), original);
+
+      expect((await hooks('install', 'claude-code', apply: true)).code, 0);
+      final preview = await hooks('uninstall', 'claude-code');
+      expect(preview.output, contains('+++ /dev/null'));
+      expect(claudeLocal().existsSync(), isTrue);
+      final removed = await hooks('uninstall', 'claude-code', apply: true);
+      expect(removed.code, 0);
+      expect(removed.output.last, contains('Removed'));
+      expect(claudeLocal().existsSync(), isFalse);
+    },
+  );
 
   test('Muse Code defaults to user settings with an async Interrupt', () async {
     final result = await hooks('install', 'muse-code', apply: true);
