@@ -232,9 +232,20 @@ class AgentHookRunner {
         payload.sessionId != null) {
       transcriptPath = findMuseTranscript(payload.sessionId!, environment);
     }
-    bool owns(CheckpointRecord checkpoint) =>
-        checkpoint.agent?.agent == agent.id &&
-        checkpoint.agent?.sessionId == payload.sessionId;
+    // A close event that names a turn closes only that turn: Muse Code runs
+    // Interrupt handlers async, so one can arrive after the next prompt.
+    // UserPromptSubmit closes any turn left open in its session.
+    bool owns(CheckpointRecord checkpoint) {
+      final context = checkpoint.agent;
+      if (context?.agent != agent.id ||
+          context?.sessionId != payload.sessionId) {
+        return false;
+      }
+      return action != AgentHookAction.close ||
+          payload.turnId == null ||
+          context?.turnId == null ||
+          context?.turnId == payload.turnId;
+    }
 
     final closed = await _withLockRetry(
       () => service.closeActive(owns: owns, transcriptPath: transcriptPath),
