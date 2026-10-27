@@ -75,6 +75,11 @@ Last updated: 2026-10-26 by Claude (Muse verification session)
   the push and pull_request runs for the code commits, including the ubuntu job that flaked on
   PR #1. A later docs-only commit hit a separate, older flake (see Broken); rerunning the failed
   jobs passed.
+- Older-test CI flake resolved (approved by Mike): five test files (`checkpoint_test`,
+  `checkpoint_restore_test`, `dmc_test`, `snapshot_store_test`, `watcher_hardening_test`) set the
+  process-wide `Directory.current` across async gaps, which raced under plain `dart test`'s
+  parallel isolates (PR #2 runs 40434543893 and 40435853311). CI's test step is now
+  `dart test --concurrency=1`, the documented gate, so the files run one at a time.
 
 ## In progress
 
@@ -88,16 +93,6 @@ Last updated: 2026-10-26 by Claude (Muse verification session)
   an `invalid` checkpoint row. Found while timing the hook on a `dmc init`'d clone; the timing
   used a clone with `website/.gitignore` moved into a root `.dmcignore`. This matters for a
   dogfooding demo; not fixed.
-- CI flake in older tests, not caused by this branch: five test files (`checkpoint_test`,
-  `checkpoint_restore_test`, `dmc_test`, `snapshot_store_test`, `watcher_hardening_test`) set the
-  process-wide `Directory.current` and keep using it across async gaps. Plain `dart test` (what CI
-  runs) shares one process across parallel isolates, so another file can change the cwd in
-  between. Seen on PR #2's run 40434543893 for commit `1528963`, which changed only STATUS.md:
-  macOS Intel failed `checkpoint_test.dart:384` ("JSON commands emit one deterministic schema
-  version 1 envelope", exit 1 instead of 0). Windows failed `recovery_preview_test.dart:379` with
-  `PathNotFoundException: Setting current working directory failed` from
-  `checkpoint_restore_test.dart` `inDirectory`. Rerunning the failed jobs passed.
-  `dart test --concurrency=1` is not affected.
 - Not verified: whether Claude Code fires `Stop` when a turn is cancelled with Esc (dmc closes it
   on the next prompt either way); whether Muse trust of a parent folder covers the folders inside
   it; whether Muse honors `XDG_DATA_HOME` (it is not passed to hooks).
@@ -108,12 +103,10 @@ Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
 1. Decide how to handle the nested `website/.gitignore` (move its rules into a root `.dmcignore`,
    or support nested ignore files) so dmc can protect this repository for the demo.
-2. Fix the older-test CI flake: give the CLI paths these tests use an explicit base path instead
-   of the process cwd, or run them with `--concurrency=1` in CI if Mike agrees to a CI change.
-3. A new deterministic `dmc checkpoint export <id> --to <dir>` command, for bisect.
-4. A worktree check, and the Doc companion skeleton: plain CLI, secret redaction, and one model
+2. A new deterministic `dmc checkpoint export <id> --to <dir>` command, for bisect.
+3. A worktree check, and the Doc companion skeleton: plain CLI, secret redaction, and one model
    client for Meta Model API and a local Glimmer.
-5. Then, per the spec's schedule: lesson library (Oct 29–30), bisect (Oct 31), push-to-talk voice
+4. Then, per the spec's schedule: lesson library (Oct 29–30), bisect (Oct 31), push-to-talk voice
    (Nov 1), parallel timelines (Nov 1–2), demo and README (Nov 3), submit (Nov 4).
 
 ## Session log
