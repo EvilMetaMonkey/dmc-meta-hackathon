@@ -71,6 +71,8 @@ Last updated: 2026-10-26 by Claude (Muse verification session)
 - Prompt delay measured: `dmc agent-hook claude-code UserPromptSubmit` on a `dmc init`'d clone of
   this repository took a 134 ms median (165 ms on the first run, about 294 ms when it also closed
   a missed Stop).
+- PR #2 (`hackathon/muse-verify`): CI passed on ubuntu, macOS, macOS Intel and Windows in both
+  the push and pull_request runs, including the ubuntu job that flaked on PR #1.
 
 ## In progress
 
