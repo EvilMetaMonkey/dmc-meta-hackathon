@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'agent_hooks.dart';
+import 'checkpoint_export.dart';
 import 'checkpoint_service.dart';
 import 'checkpoint_restore_service.dart';
 import 'daemon.dart';
@@ -203,7 +204,7 @@ Future<int> _runCheckpointCommand(ArgResults command) async {
   final subcommand = command.command;
   if (subcommand == null) {
     print(
-      'Usage: dmc checkpoint <begin|close|list|show|diff|restore|redo|recover|release>',
+      'Usage: dmc checkpoint <begin|close|list|show|diff|restore|redo|recover|release|export>',
     );
     return 2;
   }
@@ -334,6 +335,24 @@ Future<int> _runCheckpointCommand(ArgResults command) async {
         );
       }
       break;
+    case 'export':
+      if (subcommand.rest.length != 1) {
+        result = machineFailure(
+          'checkpoint.export',
+          2,
+          'checkpoint_id_required',
+          'Specify exactly one checkpoint ID.',
+        );
+      } else {
+        result = await invoke(
+          () => exportCheckpoint(
+            subcommand.rest.single,
+            to: subcommand['to'] as String?,
+            state: subcommand['state'] as String,
+          ),
+        );
+      }
+      break;
     case 'close':
     case 'show':
     case 'diff':
@@ -369,6 +388,8 @@ Future<int> _runCheckpointCommand(ArgResults command) async {
   } else {
     final lines = {'restore', 'redo', 'recover'}.contains(subcommand.name)
         ? checkpointOperationHumanLines(result)
+        : subcommand.name == 'export'
+        ? checkpointExportHumanLines(result)
         : checkpointHumanLines(result);
     for (final line in lines) {
       print(line);
@@ -411,6 +432,7 @@ int _runCapabilitiesCommand({
         'checkpoint.redo',
         'checkpoint.recover',
         'checkpoint.release',
+        'checkpoint.export',
       ],
       'features': {
         'checkpointApply': true,
@@ -420,6 +442,8 @@ int _runCapabilitiesCommand({
         'previewByDefault': true,
         'conflictBlocksAllWrites': true,
         'fileContentsInJson': false,
+        'checkpointExport': true,
+        'policyDriftPerFile': true,
       },
       'cancellation': {
         'capture': 'detect_interrupted_checkpoint',
@@ -699,7 +723,19 @@ Future<int> _runCli(List<String> args) async {
     negatable: false,
     help: 'Return all targets to their recorded pre-operation state',
   );
+  final checkpointExport = checkpointCommand.addCommand('export');
+  checkpointExport.addOption(
+    'to',
+    help: 'New or empty directory outside the workspace',
+  );
+  checkpointExport.addOption(
+    'state',
+    allowed: ['before', 'after'],
+    defaultsTo: 'after',
+    help: 'Which checkpoint manifest to export',
+  );
   for (final checkpointSubcommand in [
+    checkpointExport,
     checkpointBegin,
     checkpointList,
     checkpointCommand.addCommand('close'),
