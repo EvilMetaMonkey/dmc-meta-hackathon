@@ -262,6 +262,9 @@ Last updated: 2026-10-28 by Claude (bisect session)
   and pull_request runs for `97179b8`. dmc ran 223 tests (Windows 221 plus 2 skipped) and Doc 88
   on every platform. The `macos-latest` jobs were first cancelled after waiting 15 minutes for a
   runner (no steps ran); rerunning them passed.
+- Fixed a Doc test flake seen on `6f3503c` (macos-latest, push run): `cli_test.dart` asserted the
+  summarize prompt did not contain `abc`, the fake `.env` value, but a random checkpoint ID
+  (`…23cabcd3a866`) contained it. The fixture now uses a value that lowercase hex cannot contain.
 - **`doc bisect` (time-travel bisect)** (branch `hackathon/bisect`, Doc only; dmc unchanged).
   - What it does: finds the first agent turn after which `--test` fails, by testing
     `dmc checkpoint export` states in temporary folders, never the working copy. It checks both
