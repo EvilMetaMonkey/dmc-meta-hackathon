@@ -44,6 +44,15 @@ Commands:
                                    apply it through dmc, then offer to draft a
                                    lesson from the undone work. --yes answers
                                    yes to both; use it only for scripted demos.
+  restore "<request>" [--limit <n>] [--diff] [--yes] [--no-lesson] [--json]
+                                   Natural-language restore ("take me back to
+                                   before it touched auth"): the restore role
+                                   picks a recent checkpoint (default 30) and
+                                   a mode, Doc validates it, asks you to pick
+                                   when unsure, previews every step with dmc
+                                   and asks once before applying. --yes
+                                   answers the apply and lesson questions,
+                                   never the pick.
   lesson draft <checkpoint-id> [--note "..."]
                                    Draft a lesson from a checkpoint (workhorse
                                    role). Files come from the checkpoint, not
@@ -98,6 +107,8 @@ ArgParser _parser() => ArgParser()
   ..addFlag('keep', negatable: false)
   ..addFlag('no-explain', negatable: false)
   ..addFlag('json', negatable: false)
+  ..addOption('limit')
+  ..addFlag('diff', negatable: false)
   ..addFlag('help', abbr: 'h', negatable: false);
 
 /// Run Doc. Output goes to [out], diagnostics (retries, fallbacks, errors)
