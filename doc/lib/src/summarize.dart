@@ -43,7 +43,7 @@ String checkpointFacts(Map<String, Object?> show, Map<String, Object?> diff) {
 
   return [
     'Checkpoint ${checkpoint['id']} (${checkpoint['status']})',
-    'Label: ${checkpoint['label'] ?? '(none)'}',
+    _labelFact(checkpoint),
     'Source: ${checkpoint['source']}${agent is Map ? '; agent ${agent['name']}' : ''}',
     'Protected files: ${checkpoint['protectedFileCount']}; changed: ${checkpoint['changedFileCount']}; '
         'exclusions: ${checkpoint['exclusionCount']}; fatal issues: ${checkpoint['fatalErrorCount']}',
@@ -63,3 +63,20 @@ List<ChatMessage> summaryMessages(
   const ChatMessage('system', summarySystemPrompt),
   ChatMessage('user', checkpointFacts(show, diff)),
 ];
+
+/// dmc keeps only the first line of an agent's prompt, cut to 100
+/// characters with "…". A cut label is marked, so a model never quotes or
+/// completes it as if it were the whole prompt.
+const String truncatedLabelMarker =
+    '[truncated by dmc: the full prompt is not available; do not quote or complete it]';
+
+String _labelFact(Map checkpoint) {
+  final label = checkpoint['label'] as String?;
+  if (label == null || label.isEmpty) return 'Label: (none)';
+  final kind = checkpoint['agent'] is Map
+      ? 'Agent prompt (first line, as recorded by dmc)'
+      : 'Label';
+  final cut = label.endsWith('…');
+  final text = cut ? label.substring(0, label.length - 1).trimRight() : label;
+  return cut ? '$kind: $text $truncatedLabelMarker' : '$kind: $text';
+}

@@ -253,22 +253,47 @@ void main() {
     expect('$err', isNot(contains('FALLBACK')));
   });
 
-  test('summary falls back to baseten when Modal is not set up', () async {
-    final baseten = await FakeProvider.start([
-      FakeReply.chat('Fallback summary.', prompt: 200, completion: 50),
-    ]);
-    addTearDown(baseten.close);
-    writeConfig(baseten: baseten.baseUrl);
-    final code = await doc(
-      ['summarize', checkpointId, '--dmc', dmc, '--workspace', workspace.path],
-      env: {'BASETEN_API_KEY': 'baseten-key-for-tests-01'},
-    );
-    expect(code, 0, reason: '$err');
-    expect('$out', contains('Fallback summary.'));
-    expect('$out', contains('fell back from modal'));
-    expect('$err', contains('FALLBACK: role "summary" failed on modal'));
-    expect('$err', isNot(contains('..')));
-  });
+  test(
+    'summary uses baseten by default, with a logged fireworks fallback',
+    () async {
+      final baseten = await FakeProvider.start([
+        const FakeReply(503, {'error': 'busy'}),
+      ]);
+      final fireworks = await FakeProvider.start([
+        FakeReply.chat('Fallback summary.', prompt: 200, completion: 50),
+      ]);
+      addTearDown(baseten.close);
+      addTearDown(fireworks.close);
+      writeConfig(baseten: baseten.baseUrl);
+      File(p.join(configDir.path, 'config.json')).writeAsStringSync(
+        jsonEncode({
+          'providers': {
+            'baseten': {'baseUrl': baseten.baseUrl},
+            'fireworks': {'baseUrl': fireworks.baseUrl},
+          },
+        }),
+      );
+      final code = await doc(
+        [
+          'summarize',
+          checkpointId,
+          '--dmc',
+          dmc,
+          '--workspace',
+          workspace.path,
+        ],
+        env: {
+          'BASETEN_API_KEY': 'baseten-key-for-tests-01',
+          'FIREWORKS_API_KEY': 'fireworks-key-for-tests-02',
+        },
+      );
+      expect(code, 0, reason: '$err');
+      expect('$out', contains('Fallback summary.'));
+      expect('$out', contains('fell back from baseten'));
+      expect('$err', contains('FALLBACK: role "summary" failed on baseten'));
+      expect('$err', isNot(contains('..')));
+    },
+  );
 
   test(
     'models shows providers and key status without values; --check probes them',
@@ -310,7 +335,9 @@ void main() {
       );
       expect(text, contains('baseten: BASETEN_API_KEY is not set.'));
       expect(text, contains('fireworks: FIREWORKS_API_KEY is not set.'));
-      expect(text, contains('modal: no base URL is configured'));
+      // Modal is opt-in: listed as a provider, but no default role probes it.
+      expect(text, isNot(contains('modal: no base URL is configured')));
+      expect(text, contains('summary    baseten'));
       expect(meta.requests.single.body!['reasoning_effort'], 'low');
       expect(code, 1);
 

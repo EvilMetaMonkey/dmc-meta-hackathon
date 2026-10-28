@@ -14,3 +14,7 @@ doc/api/
 # DMC Secret Vault Database & Snapshots
 # (never commit local .dmc history — it's user-specific runtime data)
 .dmc/
+
+# Python bytecode (deploy/modal)
+__pycache__/
+*.pyc

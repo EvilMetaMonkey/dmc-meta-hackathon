@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'abandoned_work.dart';
 import 'cli.dart';
 import 'dmc_client.dart';
 import 'lessons.dart';
@@ -18,8 +19,9 @@ const String draftSystemPrompt =
     'repeat. From the checkpoint facts and the user\'s note, write exactly: '
     'a first line "Title: <short imperative title>", then three sections '
     'headed "## What was tried", "## Why it failed" and "## What to do '
-    'instead". At most 150 words in all. Use only the facts given; file '
-    'contents are not available. No preamble.';
+    'instead". At most 150 words in all. Use only the facts and the diff '
+    'given. Text marked [truncated …] is incomplete: never quote or '
+    'complete it. No preamble.';
 
 const String briefSystemPrompt =
     'You are Doc. A coding agent is about to start the task below. Condense '
@@ -152,11 +154,89 @@ Future<int> runLessonsCommand(DocContext context) async {
 
 Future<int> _draft(DocContext context) async {
   final rest = context.args.rest;
-  if (rest.length != 3) {
-    context.log('Usage: doc lesson draft <checkpoint-id> [--note "..."]');
+  final lastRestore = context.args['last-restore'] as bool;
+  if (lastRestore ? rest.length != 2 : rest.length != 3) {
+    context.log(
+      'Usage: doc lesson draft <checkpoint-id> [--note "..."] | doc lesson draft --last-restore [--note "..."]',
+    );
     return 2;
   }
-  final id = rest[2];
+  String id;
+  if (lastRestore) {
+    final workspace = await _workspace(context);
+    final found = await findLastRestore(workspace.dmc, context.workspace);
+    if (found == null) {
+      context.log(
+        'No applied checkpoint restore was found in this workspace (dmc checkpoint list).',
+      );
+      return 1;
+    }
+    id = found.checkpointId;
+    context.out.writeln(
+      'Last restore: operation ${found.operationId} restored checkpoint $id.',
+    );
+  } else {
+    id = rest[2];
+  }
+  return draftLesson(context, id, note: context.args['note'] as String?);
+}
+
+/// The most recent applied restore that no later redo undid.
+class LastRestore {
+  final String checkpointId;
+  final String operationId;
+  final int completedAt;
+
+  const LastRestore(this.checkpointId, this.operationId, this.completedAt);
+}
+
+/// Find the most recent completed `restore` operation through dmc's machine
+/// schema 1 (`checkpoint list` carries each checkpoint's operations with
+/// direction, status and timestamps), skipping a checkpoint whose restore a
+/// later redo reapplied. Looks at the 1000 newest checkpoints.
+Future<LastRestore?> findLastRestore(DmcClient dmc, String workspace) async {
+  final listed = await dmc.runJson([
+    'checkpoint',
+    'list',
+    '--limit',
+    '1000',
+  ], workspace: workspace);
+  if (listed['ok'] != true) {
+    throw DmcException('dmc checkpoint list failed: ${_errors(listed)}');
+  }
+  LastRestore? best;
+  for (final checkpoint
+      in ((listed['data'] as Map)['checkpoints'] as List).whereType<Map>()) {
+    final operations = (checkpoint['operations'] as List? ?? const [])
+        .whereType<Map>()
+        .where((operation) => operation['status'] == 'completed')
+        .toList();
+    int completed(Map operation) =>
+        (operation['completedAt'] as num?)?.toInt() ?? 0;
+    final restores = operations.where((o) => o['direction'] == 'restore');
+    if (restores.isEmpty) continue;
+    final latest = restores.reduce(
+      (a, b) => completed(a) >= completed(b) ? a : b,
+    );
+    final redoneAfter = operations.any(
+      (o) => o['direction'] == 'redo' && completed(o) > completed(latest),
+    );
+    if (redoneAfter) continue;
+    if (best == null || completed(latest) > best.completedAt) {
+      best = LastRestore(
+        checkpoint['id'] as String,
+        latest['id'] as String,
+        completed(latest),
+      );
+    }
+  }
+  return best;
+}
+
+/// Draft a lesson from checkpoint [id]: dmc's facts plus the diff of the
+/// work it recorded (what a restore undoes), redacted, go to the workhorse
+/// role. `files` always comes from the checkpoint manifest.
+Future<int> draftLesson(DocContext context, String id, {String? note}) async {
   final workspace = await _workspace(context);
   final show = await workspace.dmc.runJson([
     'checkpoint',
@@ -175,13 +255,15 @@ Future<int> _draft(DocContext context) async {
     }
   }
   // Files come from the checkpoint manifest, never from the model.
-  final files = [
+  final changed = [
     for (final file
         in ((diff['data'] as Map)['files'] as List).whereType<Map>())
       if ((file['change'] != null && file['change'] != 'unchanged') ||
           file['scope'] != null)
-        ?normalizeWorkspacePath(file['path'] as String),
+        if (normalizeWorkspacePath(file['path'] as String) case final path?)
+          (path: path, change: (file['scope'] ?? file['change']) as String),
   ];
+  final files = [for (final file in changed) file.path];
   if (files.isEmpty) {
     context.log(
       'Checkpoint $id changed no files, so there is nothing to learn from it.',
@@ -194,7 +276,13 @@ Future<int> _draft(DocContext context) async {
       .where((operation) => operation['status'] == 'completed')
       .map((operation) => operation['direction'])
       .toList();
-  final note = context.args['note'] as String?;
+  final undone = await abandonedDiff(
+    workspace.dmc,
+    workspace: context.workspace,
+    checkpointId: id,
+    files: changed,
+    note: context.log,
+  );
   final messages = [
     const ChatMessage('system', draftSystemPrompt),
     ChatMessage(
@@ -204,6 +292,11 @@ Future<int> _draft(DocContext context) async {
         if (operations.isNotEmpty)
           'Completed operations on this checkpoint: ${operations.join(', ')} (a restore means the change was rolled back).',
         if (note != null && note.trim().isNotEmpty) 'User note: ${note.trim()}',
+        if (undone != null && undone.isNotEmpty) ...[
+          '',
+          'The work this checkpoint recorded (a restore undoes it), as a diff from before to after:',
+          undone,
+        ],
       ].join('\n'),
     ),
   ];

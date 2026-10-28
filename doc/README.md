@@ -32,7 +32,8 @@ dart compile exe bin/doc.dart -o ../build/doc
 | `doc models --available` | Lists each provider's model IDs (`GET {baseUrl}/models`). |
 | `doc summarize <checkpoint-id>` | Reads `checkpoint show` and `checkpoint diff` JSON from dmc, redacts, and asks the `summary` role for a 2–3 sentence plain-English summary: what changed, which files, anything risky. |
 | `doc usage` | Tokens and estimated cost per provider against the budgets (Modal: calls and tokens; billed by GPU time). |
-| `doc lesson draft <checkpoint-id> [--note "..."]` | Drafts a lesson from a checkpoint (workhorse role). See "Lesson library". |
+| `doc restore <checkpoint-id> [--yes] [--no-lesson]` | Rollback without amnesia: preview dmc's restore, ask, apply it through dmc, then offer to draft a lesson from the undone work. See "Restore". |
+| `doc lesson draft <checkpoint-id> [--note "..."]`, `doc lesson draft --last-restore` | Drafts a lesson from a checkpoint, or from the most recent applied restore (workhorse role). See "Lesson library". |
 | `doc lesson edit\|approve\|reject <draft>`, `doc lesson show <id>` | Review a draft in `$VISUAL`/`$EDITOR`, add it to the library, delete it, or show an approved lesson. |
 | `doc lessons [--files <path>...]`, `doc lessons path` | List the library (approved lessons only), or show where it is kept. |
 | `doc lesson brief --task "<text>" [--files <path>...]` | Match lessons by file overlap and condense them into a brief (summary role). |
@@ -71,7 +72,8 @@ response timeouts are 90 s for hosted providers and 180 s for local.
 **Fallback:** one explicit, logged fallback per role, with no second hop. The log line starts
 with `FALLBACK:`. A fallback happens when the provider fails *after retries* (unreachable,
 timeout, 429/5xx, bad response) or, for Modal, when no deployment is configured. Defaults:
-`summary` modal → baseten, `workhorse` baseten → fireworks, `restore` meta → baseten. There is
+`summary` baseten → fireworks, `workhorse` baseten → fireworks, `restore` meta → baseten (and,
+with the Modal opt-in below, `summary` modal → baseten). There is
 no fallback for a missing or rejected key, a used-up budget, an answer cut off by the token
 limit, or from `local`, and none under `--local`.
 
@@ -105,11 +107,64 @@ Defaults, overridable in `config.json` under `roles`:
 
 | Role | Provider | Model | Use |
 |---|---|---|---|
-| `summary` | modal | `muse-glimmer` (fallback baseten) | Per-checkpoint summaries, lesson briefs |
+| `summary` | baseten | `meta-models/muse-spark-open-1026` (fallback fireworks) | Per-checkpoint summaries, lesson briefs |
 | `workhorse` | baseten | `meta-models/muse-spark-open-1026` (fallback fireworks) | Bisect explanations, lesson drafts |
 | `restore` | meta | `muse-spark-1.3` (fallback baseten) | Natural-language restore |
 | `planner`, `judge` | meta | `muse-wonder-1.0` | Parallel timelines |
 | `voice` | meta | `muse-voice-transcribe-1.0` | Push-to-talk (configured only; not wired up yet) |
+
+## Restore: rollback without amnesia
+
+Spec: after any rollback, Doc sends the abandoned work, redacted, to Muse Spark (Muse Glimmer in
+local mode) and drafts a short note: what was tried, why it failed, what to avoid. The user
+approves or edits it, nothing is injected silently, and approved lessons go to the library.
+
+`doc restore <checkpoint-id>` runs dmc's preview (`dmc checkpoint restore <id> --json`), shows it
+in plain terms and asks before anything changes. A real run on 2026-10-28, after a Claude Code
+turn changed `parse_amount` to return float dollars and broke `test_money.py`:
+
+```text
+Checkpoint cp_mvrsb1hb_… (closed, claude-code turn): In money.py, change parse_amount to return a float number of dollars (for example 12.5) instead of…
+Restore would change 1 file(s):
+  - money.py: put back the version from before the turn
+Restore these files? [y/N] y
+Restored 1 file(s) through dmc (operation op_mvrsbszz_1a05069692c66f8a27d3b45e).
+Draft a lesson from the work you just undid? [Y/n] y
+What went wrong? (optional, press Enter to skip)
+---
+id: "2026-10-28-keep-parse-amount-returning-integer-cent-440c"
+…
+Draft saved: ~/.local/share/dmc-doc/lessons/<workspace>/drafts/….md
+Review it with "doc lesson edit …", then "doc lesson approve …" or "doc lesson reject …".
+```
+
+- **Every file change goes through dmc's journaled restore** (`--apply`). Doc never writes
+  workspace files.
+- **Conflicts are shown and never forced.** A file edited after the turn (`workspace_drift`)
+  means nothing is changed and dmc's reason is shown; an interrupted apply prints dmc's
+  `checkpoint recover <op> --resume|--rollback` guidance.
+- Files that changed protection during the turn (`left_scope`/`entered_scope`) are listed as left
+  alone, as dmc never writes them.
+- After a successful apply it asks "Draft a lesson from the work you just undid? [Y/n]", then one
+  optional "What went wrong?" (only the person who undid it knows; without it the draft can only
+  say the change was rolled back). **`--yes` answers yes to both questions and skips the "what
+  went wrong" question; use it only for scripted demos.** `--no-lesson` skips the lesson.
+- **Restores done directly with dmc** are caught by `doc lesson draft --last-restore`. It finds
+  the most recent completed `restore` operation through dmc's existing machine schema 1 JSON
+  (`checkpoint list --limit 1000` carries each checkpoint's operations with `direction`,
+  `status` and `completedAt`), skipping one that a later completed `redo` reapplied. No dmc
+  change was needed.
+
+**What the draft sees.** dmc's facts (labels, paths, change kinds, issues) plus **the abandoned
+work as a diff**. dmc's JSON never carries file contents, so Doc runs `dmc checkpoint export
+<id> --state before` and `--state after` into a temporary directory outside the workspace,
+diffs the changed files there (two lines of context), and deletes the copies. Files named
+`.env*`, `*.pem`, `*.key` or `id_rsa*` are named only; binary files and files over 64 KiB are
+not shown; the diff is cut at 8,000 characters. The whole prompt is redacted before it is sent.
+dmc records an agent's prompt as its first line cut to 100 characters with "…". Such a label is
+sent as `… [truncated by dmc: the full prompt is not available; do not quote or complete it]`,
+and the drafting prompt tells the model never to quote or complete truncated text (the first
+real draft had echoed "0 to [truncated]"). `files` always comes from the manifest.
 
 ## Lesson library
 
@@ -179,6 +234,18 @@ Add a bulk_discount function to pricing.py for orders of 10 or more items
 Muse kept the 0–100 contract, added range validation and `bulk_discount`, and `checkout.py`
 still printed `60.0`. The brief came from Muse Spark Open on Baseten through the logged
 `summary` fallback, because the Modal Glimmer deployment is not up yet.
+
+### Opt-in: Muse Glimmer on Modal for `summary`
+
+Modal is on hold (it needs a card on file for GPUs). Once `deploy/modal/` is deployed, set its URL
+and switch the `summary` role to it with one line in `~/.config/dmc-doc/config.json`:
+
+```json
+{"providers": {"modal": {"baseUrl": "https://…modal.run/v1"}}, "roles": {"summary": {"provider": "modal", "model": "muse-glimmer", "fallbackProvider": "baseten"}}}
+```
+
+`DOC_MODAL_BASE_URL` can supply the URL instead. A failing or unconfigured Modal then falls back
+to Baseten, logged.
 
 ## Safety
 

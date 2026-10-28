@@ -107,10 +107,15 @@ The most important product qualities are:
 - **Doc providers:** `meta` (Muse Spark 1.3, Muse Wonder), `baseten` (Muse Spark Open), `fireworks`
   (Muse Spark Open backup), `modal` (Mike's private Muse Glimmer deployment in `deploy/modal/`;
   base URL from the config or `DOC_MODAL_BASE_URL`, never committed) and `local` (this Mac).
-  Roles: `summary` modal → baseten, `workhorse` baseten → fireworks, `restore` meta → baseten;
+  Roles: `summary` baseten → fireworks (Modal Glimmer is an opt-in, see `doc/README.md`),
+  `workhorse` baseten → fireworks, `restore` meta → baseten;
   every fallback is logged and there is no second hop. `--local` means this Mac only and refuses
   Modal. Keys only from env vars (`MODEL_API_KEY`, `BASETEN_API_KEY`, `FIREWORKS_API_KEY`,
   `MODAL_GLIMMER_KEY`). See `doc/README.md`.
+- **`doc restore` only drives dmc.** It previews with `dmc checkpoint restore <id> --json`, applies
+  with `--apply` after the user agrees, never forces a conflict or recovery, then offers a lesson.
+  To show the model the undone work, Doc exports the checkpoint's states with
+  `dmc checkpoint export` into a temporary directory outside the workspace and diffs them there.
 - **Lessons are Doc-only.** dmc never sees them. Matching is a fixed file-overlap rule; models only
   draft lessons (workhorse) and condense briefs (summary). Nothing enters the library without
   `doc lesson approve`, and a brief reaches an agent only after the user agrees (`--yes` is for
@@ -291,7 +296,9 @@ Use `docs/TESTER-READINESS-AUDIT.md` as the original audit and the Phase 2/3 han
 - Doc (from `doc/`): `dart run bin/doc.dart models [--check] [--available]`,
   `dart run bin/doc.dart summarize <checkpoint-id> [--local] [--show-prompt] [--role-provider summary=baseten]`,
   `dart run bin/doc.dart usage`, `dart run bin/doc.dart lesson draft|edit|approve|reject|show|brief`,
-  `dart run bin/doc.dart lessons [path]`, `dart run bin/doc.dart start <muse-code|claude-code> "<task>"`. Its gate: `dart pub get --enforce-lockfile`,
+  `dart run bin/doc.dart lessons [path]`, `dart run bin/doc.dart start <muse-code|claude-code> "<task>"`,
+  `dart run bin/doc.dart restore <checkpoint-id> [--yes] [--no-lesson]`,
+  `dart run bin/doc.dart lesson draft --last-restore`. Its gate: `dart pub get --enforce-lockfile`,
   `dart analyze --fatal-infos`, `DMC_TEST_BIN=../build/dmc/bundle/bin/dmc dart test --concurrency=1`.
 - `dart run bin/dmc.dart init`
 - `dart run bin/dmc.dart watch`

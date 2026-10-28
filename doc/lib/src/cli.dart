@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'config.dart';
 import 'dmc_client.dart';
 import 'lesson_commands.dart';
+import 'restore_command.dart';
 import 'model_client.dart';
 import 'model_router.dart';
 import 'summarize.dart';
@@ -29,10 +30,16 @@ Commands:
   summarize <checkpoint-id>        Summarize a checkpoint in plain English.
   usage                            Tokens and estimated cost per provider.
 
+  restore <checkpoint-id> [--yes] [--no-lesson]
+                                   Preview dmc's restore of a checkpoint, ask,
+                                   apply it through dmc, then offer to draft a
+                                   lesson from the undone work. --yes answers
+                                   yes to both; use it only for scripted demos.
   lesson draft <checkpoint-id> [--note "..."]
                                    Draft a lesson from a checkpoint (workhorse
                                    role). Files come from the checkpoint, not
-                                   the model. Saved as a draft.
+                                   the model. Saved as a draft. --last-restore
+                                   drafts from the most recent applied restore.
   lesson edit <draft>              Open a draft in \$VISUAL / \$EDITOR.
   lesson approve <draft>           Validate a draft and add it to the library.
   lesson reject <draft>            Delete a draft.
@@ -70,6 +77,8 @@ ArgParser _parser() => ArgParser()
   ..addOption('task')
   ..addMultiOption('files')
   ..addFlag('yes', negatable: false)
+  ..addFlag('last-restore', negatable: false)
+  ..addFlag('no-lesson', negatable: false)
   ..addFlag('help', abbr: 'h', negatable: false);
 
 /// Run Doc. Output goes to [out], diagnostics (retries, fallbacks, errors)
@@ -153,6 +162,8 @@ Future<int> runDoc(
         return await runLessonsCommand(context);
       case 'start':
         return await runStartCommand(context);
+      case 'restore':
+        return await runRestoreCommand(context);
       default:
         log('Unknown command "${args.rest.first}".\n\n$docUsage');
         return 2;
