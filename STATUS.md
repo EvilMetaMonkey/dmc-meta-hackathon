@@ -347,6 +347,11 @@ Last updated: 2026-10-28 by Claude (Glimmer and natural-language restore session
     Hooks were uninstalled (Muse `settings.json` back to the same SHA-256), the demo lesson
     draft was rejected and the repo removed. Cost: meta $0.022 (incl. two manual probes),
     baseten $0.0056, fireworks $0.0020, Modal GPU time as above.
+  - Gates on the Mac: dmc analyzer clean, `dart test --concurrency=1` 223 passed, Haven contract
+    tests 3 passed; Doc `dart analyze --fatal-infos` clean, 121 tests passed.
+  - PR #9 (`hackathon/glimmer-nl-restore`): CI passed on ubuntu, macOS, macOS Intel and Windows in
+    both the push and pull_request runs for `303d296`. dmc ran 223 tests (Windows 221 plus 2
+    skipped), the Haven contract 3 and Doc 121 on every platform.
   - The agents ran without blanket approval: Claude Code with `--allowedTools Read
     "Edit(<file>)"` and Muse Code with its defaults plus `--disable-shell --disable-web-tools`
     (a blanket-approval launch was refused by this session's permission check).
