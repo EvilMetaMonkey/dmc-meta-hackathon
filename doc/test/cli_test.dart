@@ -266,30 +266,43 @@ void main() {
     expect(baseten.requests, isEmpty);
   });
 
-  test(
-    'a missing local server is explained, with a one-run override',
-    () async {
-      final local = await closedBaseUrl();
-      writeConfig(local: local);
-      final code = await doc([
-        'summarize',
-        checkpointId,
-        '--dmc',
-        dmc,
-        '--workspace',
-        workspace.path,
-      ]);
-      expect(code, 1);
-      expect(
-        '$err',
-        contains('The local model server is not running at $local'),
-      );
-      expect('$err', contains('--role-provider summary=baseten'));
-    },
-  );
+  test('--local with no local server is explained plainly', () async {
+    final local = await closedBaseUrl();
+    writeConfig(local: local);
+    final code = await doc([
+      'summarize',
+      checkpointId,
+      '--dmc',
+      dmc,
+      '--workspace',
+      workspace.path,
+      '--local',
+    ]);
+    expect(code, 1);
+    expect('$err', contains('The local model server is not running at $local'));
+    expect('$err', contains('run without --local'));
+    expect('$err', isNot(contains('FALLBACK')));
+  });
+
+  test('summary falls back to baseten when Modal is not set up', () async {
+    final baseten = await FakeProvider.start([
+      FakeReply.chat('Fallback summary.', prompt: 200, completion: 50),
+    ]);
+    addTearDown(baseten.close);
+    writeConfig(baseten: baseten.baseUrl);
+    final code = await doc(
+      ['summarize', checkpointId, '--dmc', dmc, '--workspace', workspace.path],
+      env: {'BASETEN_API_KEY': 'baseten-key-for-tests-01'},
+    );
+    expect(code, 0, reason: '$err');
+    expect('$out', contains('Fallback summary.'));
+    expect('$out', contains('fell back from modal'));
+    expect('$err', contains('FALLBACK: role "summary" failed on modal'));
+    expect('$err', isNot(contains('..')));
+  });
 
   test(
-    'models shows key status without values; --check probes providers',
+    'models shows providers and key status without values; --check probes them',
     () async {
       final meta = await FakeProvider.start([
         FakeReply.chat('ok', prompt: 9, completion: 30),
@@ -313,6 +326,13 @@ void main() {
       expect(text, isNot(contains(metaKey)));
       expect(text, contains('MODEL_API_KEY set'));
       expect(text, contains('BASETEN_API_KEY NOT set'));
+      expect(text, contains('modal (your private deployment)'));
+      expect(
+        text,
+        contains(
+          'Provider modal (your private deployment): not configured (set providers.modal.baseUrl or DOC_MODAL_BASE_URL)',
+        ),
+      );
       expect(
         text,
         matches(
@@ -320,9 +340,24 @@ void main() {
         ),
       );
       expect(text, contains('baseten: BASETEN_API_KEY is not set.'));
-      expect(text, contains('The local model server is not running at'));
+      expect(text, contains('fireworks: FIREWORKS_API_KEY is not set.'));
+      expect(text, contains('modal: no base URL is configured'));
       expect(meta.requests.single.body!['reasoning_effort'], 'low');
       expect(code, 1);
+
+      out.clear();
+      expect(await doc(['models', '--check', '--local']), 1);
+      expect('$out', contains('Mode: --local'));
+      expect('$out', isNot(contains('Provider modal')));
+      expect('$out', contains('The local model server is not running at'));
+
+      out.clear();
+      expect(await doc(['usage']), 0);
+      expect(
+        '$out',
+        contains('billed by GPU time on Modal; check the Modal dashboard'),
+      );
+      expect('$out', contains('fireworks'));
     },
   );
 }

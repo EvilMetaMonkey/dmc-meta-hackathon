@@ -31,7 +31,8 @@ Commands:
 Options:
   --dmc <path>                     The dmc executable (else DMC_BIN, then PATH).
   --workspace <dir>                The dmc workspace (default: current dir).
-  --local                          Use only the local model; refuse hosted calls.
+  --local                          Use only this Mac's model server; refuse hosted
+                                   and Modal calls.
   --role-provider <role>=<provider>
                                    Use another provider for one role, this run.
   --show-prompt                    Print exactly what would be sent; send nothing.
@@ -165,10 +166,12 @@ Future<int> _models(_Context context) async {
     'Config: ${context.configFile.path}${context.configFile.existsSync() ? '' : ' (not found; using defaults)'}',
   );
   if (context.router.localOnly) {
-    out.writeln('Mode: --local (hosted calls refused)');
+    out.writeln(
+      'Mode: --local (this Mac only; hosted and Modal calls refused)',
+    );
   }
   out.writeln(
-    '${_pad('Role', 11)}${_pad('Provider', 9)}${_pad('Model', 36)}Key',
+    '${_pad('Role', 11)}${_pad('Provider', 33)}${_pad('Model', 43)}Key',
   );
   final probes = <String, String>{};
   for (final role in context.config.roles.keys) {
@@ -178,7 +181,7 @@ Future<int> _models(_Context context) async {
         ? ''
         : '  (fallback: ${route.fallbackProvider!.id} ${route.fallbackModel})';
     out.writeln(
-      '${_pad(role, 11)}${_pad(route.provider.id, 9)}${_pad(route.model, 36)}${context.keyStatus(route.provider)}${roleConfig.chat ? '' : '  (transcription; not wired up yet)'}$fallback',
+      '${_pad(role, 11)}${_pad(route.provider.label, 33)}${_pad(route.model, 43)}${context.keyStatus(route.provider)}${roleConfig.chat ? '' : '  (transcription; not wired up yet)'}$fallback',
     );
     if (roleConfig.chat) {
       probes.putIfAbsent(route.provider.id, () => route.model);
@@ -191,18 +194,26 @@ Future<int> _models(_Context context) async {
     }
   }
   for (final provider in context.config.providers.values) {
-    if (probes.containsKey(provider.id) || !context.router.localOnly) {
-      out.writeln('Provider ${provider.id}: ${provider.baseUrl}');
-    }
+    if (context.router.localOnly && provider.hosted) continue;
+    final url = provider.resolvedBaseUrl(context.env);
+    out.writeln(
+      'Provider ${provider.label}: ${url.isEmpty ? 'not configured (set providers.${provider.id}.baseUrl${provider.baseUrlEnv == null ? '' : ' or ${provider.baseUrlEnv}'})' : url}',
+    );
   }
 
   var failed = false;
   if (context.args['available'] as bool) {
     out.writeln('');
-    for (final provider in context.config.providers.values) {
-      if (context.router.localOnly && provider.hosted) continue;
+    for (final configured in context.config.providers.values) {
+      if (context.router.localOnly && configured.hosted) continue;
+      final url = configured.resolvedBaseUrl(context.env);
+      if (url.isEmpty) {
+        out.writeln('${configured.id} models: skipped (not configured)');
+        continue;
+      }
+      final provider = configured.withBaseUrl(url);
       final key = provider.keyEnv == null ? null : context.env[provider.keyEnv];
-      if (provider.hosted && (key == null || key.isEmpty)) {
+      if (provider.keyEnv != null && (key == null || key.isEmpty)) {
         out.writeln(
           '${provider.id} models: skipped (${provider.keyEnv} not set)',
         );
@@ -212,7 +223,9 @@ Future<int> _models(_Context context) async {
         final ids = await context.router.client.listModels(provider, key);
         out.writeln('${provider.id} models (${ids.length}): ${ids.join(', ')}');
       } on ModelCallException catch (error) {
-        out.writeln('${provider.id} models: ${_explain(error, provider)}');
+        out.writeln(
+          '${provider.id} models: ${_explain(error, provider, localOnly: context.router.localOnly)}',
+        );
       }
     }
   }
@@ -221,23 +234,26 @@ Future<int> _models(_Context context) async {
     out.writeln('');
     for (final entry in probes.entries) {
       final provider = context.config.providers[entry.key]!;
-      final label = '${_pad(provider.id, 9)}${_pad(entry.value, 36)}';
+      final label = '${_pad(provider.id, 10)}${_pad(entry.value, 43)}';
       try {
         final result = await context.router.callProvider(
           provider,
           entry.value,
           const [ChatMessage('user', 'Reply with the single word: ok')],
-          // Muse Spark reasons before answering, even for "ok".
-          maxTokens: provider.hosted ? 600 : 64,
+          // Muse models reason before answering, even for "ok".
+          maxTokens: 600,
         );
         out.writeln(
           '${label}ok  ${result.result.latency.inMilliseconds} ms  '
           '${result.result.promptTokens} in / ${result.result.completionTokens} out  '
-          '\$${result.costUsd.toStringAsFixed(6)}  reply: ${jsonEncode(_short(result.result.content))}',
+          '${provider.billing == ProviderBilling.gpuTime ? 'billed by GPU time' : '\$${result.costUsd.toStringAsFixed(6)}'}  '
+          'reply: ${jsonEncode(_short(result.result.content))}',
         );
       } on ModelCallException catch (error) {
         failed = true;
-        out.writeln('${label}FAILED  ${_explain(error, provider)}');
+        out.writeln(
+          '${label}FAILED  ${_explain(error, provider, localOnly: context.router.localOnly)}',
+        );
       }
     }
   }
@@ -252,14 +268,20 @@ String _explain(
   ModelCallException error,
   ProviderConfig provider, {
   String? role,
+  bool localOnly = false,
 }) {
+  final alternative = role == null
+      ? ''
+      : localOnly
+      ? ', or run without --local'
+      : ', or run once with --role-provider $role=baseten';
   if (!provider.hosted && error.kind == ModelCallFailure.unreachable) {
     return 'The local model server is not running at ${provider.baseUrl} (${error.message.split('(').last.replaceAll(')', '')}). '
-        'Start Ollama or llama-server${role == null ? '' : ', or run once with --role-provider $role=baseten'}.';
+        'Start Ollama, LM Studio or llama-server$alternative.';
   }
   if (!provider.hosted && error.statusCode == 404) {
     return 'The local server at ${provider.baseUrl} has no model "${provider.defaultModel}" (HTTP 404). '
-        'Load it there, set providers.local.defaultModel in the config${role == null ? '' : ', or run once with --role-provider $role=baseten'}.';
+        'Load it there, set providers.local.defaultModel in the config$alternative.';
   }
   return error.message;
 }
@@ -337,7 +359,14 @@ Future<int> _summarize(_Context context) async {
     return 0;
   } on ModelCallException catch (error) {
     final provider = context.config.providers[error.provider] ?? route.provider;
-    context.log(_explain(error, provider, role: 'summary'));
+    context.log(
+      _explain(
+        error,
+        provider,
+        role: 'summary',
+        localOnly: context.router.localOnly,
+      ),
+    );
     return 1;
   }
 }
@@ -346,15 +375,29 @@ int _usage(_Context context) {
   final usage = context.router.usage.read();
   context.out.writeln('Usage file: ${context.router.usage.file.path}');
   context.out.writeln(
-    '${_pad('Provider', 9)}${_pad('Calls', 7)}${_pad('Tokens in', 11)}${_pad('Tokens out', 12)}${_pad('Cost', 12)}Budget',
+    '${_pad('Provider', 10)}${_pad('Calls', 7)}${_pad('Tokens in', 11)}${_pad('Tokens out', 12)}${_pad('Cost', 12)}Budget',
   );
   for (final provider in context.config.providers.values) {
     final used = usage[provider.id] ?? const ProviderUsage();
     final budget = provider.budgetUsd;
+    final String cost;
+    final String limit;
+    switch (provider.billing) {
+      case ProviderBilling.gpuTime:
+        cost = 'n/a';
+        limit = 'billed by GPU time on Modal; check the Modal dashboard';
+      case ProviderBilling.none:
+        cost = 'n/a';
+        limit = 'n/a (this Mac)';
+      case ProviderBilling.tokens:
+        cost = '\$${used.costUsd.toStringAsFixed(4)}';
+        limit = budget == null
+            ? 'none'
+            : '\$${budget.toStringAsFixed(2)} (\$${(budget - used.costUsd).clamp(0, budget).toStringAsFixed(4)} left)';
+    }
     context.out.writeln(
-      '${_pad(provider.id, 9)}${_pad('${used.calls}', 7)}${_pad('${used.promptTokens}', 11)}'
-      '${_pad('${used.completionTokens}', 12)}${_pad('\$${used.costUsd.toStringAsFixed(4)}', 12)}'
-      '${budget == null ? (provider.hosted ? 'none' : 'n/a (local)') : '\$${budget.toStringAsFixed(2)} (\$${(budget - used.costUsd).clamp(0, budget).toStringAsFixed(4)} left)'}',
+      '${_pad(provider.id, 10)}${_pad('${used.calls}', 7)}${_pad('${used.promptTokens}', 11)}'
+      '${_pad('${used.completionTokens}', 12)}${_pad(cost, 12)}$limit',
     );
   }
   return 0;

@@ -25,23 +25,63 @@ class ModelPrice {
   );
 }
 
+/// How a provider bills, which decides budget enforcement.
+enum ProviderBilling {
+  /// Per token at the configured prices; budgets are enforced.
+  tokens,
+
+  /// By GPU time on the host (Modal). Doc records calls and tokens but
+  /// cannot see GPU-seconds, so there is no price or budget check.
+  gpuTime,
+
+  /// No charge (the local server).
+  none,
+}
+
 /// One OpenAI-compatible endpoint.
 class ProviderConfig {
   final String id;
+
+  /// The base URL, or empty when it must come from [baseUrlEnv].
   final String baseUrl;
+
+  /// An environment variable that overrides [baseUrl], for example
+  /// `DOC_MODAL_BASE_URL`.
+  final String? baseUrlEnv;
 
   /// The environment variable that holds the API key; null for no key.
   final String? keyEnv;
   final String defaultModel;
 
-  /// Hosted providers get redacted prompts, budgets and fallbacks; the local
-  /// provider never falls back to a hosted one.
+  /// A short label for `doc models`, for example "your private deployment".
+  final String? description;
+
+  /// Hosted providers get redacted prompts and may be a fallback target;
+  /// they are refused under `--local`. Only the Mac's own server is not
+  /// hosted, and it never falls back to a hosted one.
   final bool hosted;
+  final ProviderBilling billing;
   final Map<String, ModelPrice> prices;
 
   /// Spending limit in USD; calls are blocked once usage reaches it.
   final double? budgetUsd;
   final Duration timeout;
+
+  /// Request style. `reasoning_effort` is sent to models that always reason
+  /// (Muse Spark); the token limit goes in [tokenLimitField].
+  final bool sendReasoningEffort;
+  final String tokenLimitField;
+
+  /// Sampling parameters sent with every request (for example Muse
+  /// Glimmer's recommended temperature 1.0, top_p 0.95, top_k 64).
+  final Map<String, num> sampling;
+
+  /// Muse Glimmer's reasoning control: a `Reasoning strength: <value>` line
+  /// in the system prompt (low, medium, high or xhigh).
+  final String? reasoningStrength;
+
+  /// Printed when a call has not answered after 10 s (a cold start).
+  final String? wakeNotice;
 
   const ProviderConfig({
     required this.id,
@@ -49,42 +89,81 @@ class ProviderConfig {
     required this.keyEnv,
     required this.defaultModel,
     required this.hosted,
+    this.baseUrlEnv,
+    this.description,
+    this.billing = ProviderBilling.tokens,
     this.prices = const {},
     this.budgetUsd,
     this.timeout = const Duration(seconds: 90),
+    this.sendReasoningEffort = false,
+    this.tokenLimitField = 'max_tokens',
+    this.sampling = const {},
+    this.reasoningStrength,
+    this.wakeNotice,
   });
 
-  ProviderConfig copyWith({String? baseUrl, String? defaultModel}) =>
-      ProviderConfig(
-        id: id,
-        baseUrl: baseUrl ?? this.baseUrl,
-        keyEnv: keyEnv,
-        defaultModel: defaultModel ?? this.defaultModel,
-        hosted: hosted,
-        prices: prices,
-        budgetUsd: budgetUsd,
-        timeout: timeout,
-      );
+  /// [baseUrl], or [baseUrlEnv]'s value when it is set.
+  String resolvedBaseUrl(Map<String, String> environment) {
+    final fromEnv = baseUrlEnv == null ? null : environment[baseUrlEnv];
+    return (fromEnv != null && fromEnv.trim().isNotEmpty)
+        ? fromEnv.trim()
+        : baseUrl;
+  }
+
+  String get label => description == null ? id : '$id ($description)';
+
+  ProviderConfig withBaseUrl(String value) => ProviderConfig(
+    id: id,
+    baseUrl: value,
+    keyEnv: keyEnv,
+    defaultModel: defaultModel,
+    hosted: hosted,
+    baseUrlEnv: baseUrlEnv,
+    description: description,
+    billing: billing,
+    prices: prices,
+    budgetUsd: budgetUsd,
+    timeout: timeout,
+    sendReasoningEffort: sendReasoningEffort,
+    tokenLimitField: tokenLimitField,
+    sampling: sampling,
+    reasoningStrength: reasoningStrength,
+    wakeNotice: wakeNotice,
+  );
 
   Map<String, Object?> toJson() => {
     'baseUrl': baseUrl,
+    'baseUrlEnv': baseUrlEnv,
     'keyEnv': keyEnv,
     'defaultModel': defaultModel,
+    'description': description,
     'hosted': hosted,
+    'billing': billing.name,
     'prices': {
       for (final entry in prices.entries) entry.key: entry.value.toJson(),
     },
     'budgetUsd': budgetUsd,
     'timeoutSeconds': timeout.inSeconds,
+    'sendReasoningEffort': sendReasoningEffort,
+    'tokenLimitField': tokenLimitField,
+    'sampling': sampling,
+    'reasoningStrength': reasoningStrength,
+    'wakeNotice': wakeNotice,
   };
 
   static ProviderConfig fromJson(String id, Map<String, Object?> json) =>
       ProviderConfig(
         id: id,
-        baseUrl: json['baseUrl'] as String,
+        baseUrl: json['baseUrl'] as String? ?? '',
+        baseUrlEnv: json['baseUrlEnv'] as String?,
         keyEnv: json['keyEnv'] as String?,
         defaultModel: json['defaultModel'] as String,
+        description: json['description'] as String?,
         hosted: json['hosted'] as bool? ?? true,
+        billing: ProviderBilling.values.firstWhere(
+          (value) => value.name == json['billing'],
+          orElse: () => ProviderBilling.tokens,
+        ),
         prices: {
           for (final entry in ((json['prices'] as Map?) ?? const {}).entries)
             entry.key as String: ModelPrice.fromJson(
@@ -95,6 +174,14 @@ class ProviderConfig {
         timeout: Duration(
           seconds: (json['timeoutSeconds'] as num?)?.toInt() ?? 90,
         ),
+        sendReasoningEffort: json['sendReasoningEffort'] as bool? ?? false,
+        tokenLimitField: json['tokenLimitField'] as String? ?? 'max_tokens',
+        sampling: {
+          for (final entry in ((json['sampling'] as Map?) ?? const {}).entries)
+            entry.key as String: entry.value as num,
+        },
+        reasoningStrength: json['reasoningStrength'] as String?,
+        wakeNotice: json['wakeNotice'] as String?,
       );
 }
 
@@ -145,6 +232,9 @@ const String metaWonderModel = 'muse-wonder-1.0';
 const String metaVoiceModel = 'muse-voice-transcribe-1.0';
 const String basetenSparkOpenModel = 'meta-models/muse-spark-open-1026';
 const String localGlimmerModel = 'muse-glimmer';
+const String modalGlimmerModel = 'muse-glimmer';
+const String fireworksSparkOpenModel =
+    'accounts/fireworks/models/muse-spark-open';
 
 /// Doc's configuration: providers and role routing.
 class DocConfig {
@@ -179,6 +269,8 @@ class DocConfig {
           metaWonderModel: ModelPrice(4.00, 20.00),
         },
         budgetUsd: 150,
+        sendReasoningEffort: true,
+        tokenLimitField: 'max_completion_tokens',
       ),
       'baseten': ProviderConfig(
         id: 'baseten',
@@ -188,26 +280,64 @@ class DocConfig {
         hosted: true,
         prices: {basetenSparkOpenModel: ModelPrice(1.25, 4.25)},
         budgetUsd: 100,
+        sendReasoningEffort: true,
+      ),
+      'fireworks': ProviderConfig(
+        id: 'fireworks',
+        baseUrl: 'https://api.fireworks.ai/inference/v1',
+        keyEnv: 'FIREWORKS_API_KEY',
+        defaultModel: fireworksSparkOpenModel,
+        hosted: true,
+        prices: {fireworksSparkOpenModel: ModelPrice(1.25, 4.25)},
+        budgetUsd: 100,
+        sendReasoningEffort: true,
+      ),
+      // Muse Glimmer on Mike's own Modal deployment (deploy/modal/). Not
+      // local: --local refuses it. The base URL comes from the config file
+      // or DOC_MODAL_BASE_URL and is never committed.
+      'modal': ProviderConfig(
+        id: 'modal',
+        baseUrl: '',
+        baseUrlEnv: 'DOC_MODAL_BASE_URL',
+        keyEnv: 'MODAL_GLIMMER_KEY',
+        defaultModel: modalGlimmerModel,
+        description: 'your private deployment',
+        hosted: true,
+        billing: ProviderBilling.gpuTime,
+        // A cold start loads ~60 GB of weights onto the GPU.
+        timeout: Duration(seconds: 600),
+        sampling: {'temperature': 1.0, 'top_p': 0.95, 'top_k': 64},
+        reasoningStrength: 'low',
+        wakeNotice:
+            'Waking Muse Glimmer on Modal (can take a couple of minutes)…',
       ),
       'local': ProviderConfig(
         id: 'local',
         baseUrl: 'http://127.0.0.1:11434/v1',
         keyEnv: null,
         defaultModel: localGlimmerModel,
+        description: 'this Mac',
         hosted: false,
+        billing: ProviderBilling.none,
         timeout: Duration(seconds: 180),
+        sampling: {'temperature': 1.0, 'top_p': 0.95, 'top_k': 64},
+        reasoningStrength: 'low',
       ),
     },
     roles: {
       'summary': RoleConfig(
         role: 'summary',
-        provider: 'local',
-        model: localGlimmerModel,
+        provider: 'modal',
+        model: modalGlimmerModel,
+        fallbackProvider: 'baseten',
+        fallbackModel: basetenSparkOpenModel,
       ),
       'workhorse': RoleConfig(
         role: 'workhorse',
         provider: 'baseten',
         model: basetenSparkOpenModel,
+        fallbackProvider: 'fireworks',
+        fallbackModel: fireworksSparkOpenModel,
       ),
       'restore': RoleConfig(
         role: 'restore',

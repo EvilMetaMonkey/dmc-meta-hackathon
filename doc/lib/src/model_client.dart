@@ -51,6 +51,9 @@ enum ModelCallFailure {
   /// after spending every completion token on reasoning.
   truncated,
   missingKey,
+
+  /// The provider has no base URL (for example, no Modal deployment).
+  notConfigured,
   budgetExceeded,
   refused,
 }
@@ -79,32 +82,58 @@ class ModelCallException implements Exception {
   String toString() => message;
 }
 
-/// Providers whose models always reason, so `reasoning_effort` is sent.
-const Set<String> reasoningProviders = {'meta', 'baseten'};
-
-/// The JSON body for a chat call, following each provider's rules.
+/// The JSON body for a chat call, following [provider]'s request style.
 ///
-/// meta (Muse Spark, Muse Wonder): always `reasoning_effort` (never "none")
-/// and `max_completion_tokens`; never `stop`, `n`, `logit_bias`, penalties,
-/// `max_tokens` or a temperature. baseten (Muse Spark Open, which also
-/// always reasons) gets `reasoning_effort` and `max_tokens`; local gets
-/// `max_tokens` only.
+/// Muse Spark models (meta, baseten, fireworks) always reason: they get
+/// `reasoning_effort` (never "none"). meta takes `max_completion_tokens`
+/// and never `stop`, `n`, `logit_bias`, penalties, `max_tokens` or a
+/// temperature. Muse Glimmer (modal, local) gets Meta's recommended
+/// sampling and its reasoning strength as a `Reasoning strength: <value>`
+/// line in the system prompt.
 Map<String, Object?> chatRequestBody({
   required ProviderConfig provider,
   required String model,
   required List<ChatMessage> messages,
   required int maxTokens,
   String reasoningEffort = 'low',
-}) => {
-  'model': model,
-  'messages': [for (final message in messages) message.toJson()],
-  if (reasoningProviders.contains(provider.id))
-    'reasoning_effort': reasoningEffort == 'none' ? 'low' : reasoningEffort,
-  if (provider.id == 'meta')
-    'max_completion_tokens': maxTokens
-  else
-    'max_tokens': maxTokens,
-};
+}) {
+  var sent = messages;
+  final strength = provider.reasoningStrength;
+  if (strength != null) {
+    final line = 'Reasoning strength: $strength.';
+    sent = messages.isNotEmpty && messages.first.role == 'system'
+        ? [
+            ChatMessage('system', '$line\n${messages.first.content}'),
+            ...messages.skip(1),
+          ]
+        : [ChatMessage('system', line), ...messages];
+  }
+  return {
+    'model': model,
+    'messages': [for (final message in sent) message.toJson()],
+    if (provider.sendReasoningEffort)
+      'reasoning_effort': reasoningEffort == 'none' ? 'low' : reasoningEffort,
+    ...provider.sampling,
+    provider.tokenLimitField: maxTokens,
+  };
+}
+
+/// Remove reasoning text a server left in the answer: Muse Glimmer's
+/// `to=self` reasoning channel (when no reasoning parser split it out),
+/// `<think>` blocks, and stray channel tokens.
+String stripReasoning(String content) {
+  var text = content.replaceAll(
+    RegExp(
+      r'<\|start\|>assistant to=self<\|message\|>[\s\S]*?(<\|eom\|>|<\|end\|>|$)',
+    ),
+    '',
+  );
+  text = text.replaceAll(RegExp(r'<think>[\s\S]*?(</think>|$)'), '');
+  // A final channel header such as "<|start|>assistant to=user<|message|>".
+  text = text.replaceAll(RegExp(r'<\|start\|>assistant[^<]*<\|message\|>'), '');
+  text = text.replaceAll(RegExp(r'<\|(eom|end|eot|return)\|>'), '');
+  return text.trim();
+}
 
 /// One OpenAI-compatible Chat Completions client
 /// (`POST {baseUrl}/chat/completions`). API keys are sent only in the
@@ -116,9 +145,14 @@ class ChatClient {
   final Random random;
   final void Function(String message) log;
 
+  /// How long a call may go unanswered before a provider's wake notice is
+  /// printed.
+  final Duration wakeAfter;
+
   ChatClient({
     this.maxRetries = 3,
     this.baseDelay = const Duration(milliseconds: 500),
+    this.wakeAfter = const Duration(seconds: 10),
     Future<void> Function(Duration)? sleep,
     Random? random,
     void Function(String message)? log,
@@ -134,6 +168,25 @@ class ChatClient {
     required String? apiKey,
   }) async {
     final stopwatch = Stopwatch()..start();
+    // A cold start (for example Modal scaling up from zero) can take
+    // minutes; say so once instead of looking hung.
+    final notice = provider.wakeNotice;
+    final wakeTimer = notice == null
+        ? null
+        : Timer(wakeAfter, () => log(notice));
+    try {
+      return await _completeWithRetries(provider, body, apiKey, stopwatch);
+    } finally {
+      wakeTimer?.cancel();
+    }
+  }
+
+  Future<ChatResult> _completeWithRetries(
+    ProviderConfig provider,
+    Map<String, Object?> body,
+    String? apiKey,
+    Stopwatch stopwatch,
+  ) async {
     for (var attempt = 1; ; attempt++) {
       try {
         final response = await _post(
@@ -319,7 +372,7 @@ class ChatClient {
     final content = message['content'];
     final usage = json['usage'] is Map ? json['usage'] as Map : const {};
     return ChatResult(
-      content: content is String ? content.trim() : '',
+      content: content is String ? stripReasoning(content) : '',
       finishReason: (choices as List).first is Map
           ? ((choices.first as Map)['finish_reason'] as String?)
           : null,
