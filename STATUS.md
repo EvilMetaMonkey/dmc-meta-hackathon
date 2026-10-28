@@ -252,6 +252,9 @@ Last updated: 2026-10-28 by Claude (rollback lessons session)
        `doc lessons`.
 
     Cost: 2 Baseten calls, $0.0047.
+- PR #7 (`hackathon/rollback-lessons`): CI passed on ubuntu, macOS, macOS Intel and Windows in
+  both the push and pull_request runs for `a9818a6`. dmc ran 223 tests (Windows 221 plus 2
+  skipped) and Doc 73 on every platform.
 - Cleanup: stopped tracking `deploy/modal/__pycache__/` (now ignored), removed the Modal
   workspace name from the docs, and defaulted `summary` to Baseten with a Fireworks fallback.
   Modal Glimmer is an opt-in.
