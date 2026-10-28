@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library session)
+Last updated: 2026-10-28 by Claude (rollback lessons session)
 
 ## Done
 
@@ -227,6 +227,34 @@ Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library sessio
   `~/.zshrc.backup-20261027-204740`, mode 600).
 - Demo cleanup: Muse's `settings.json` hooks were uninstalled (same SHA-256 as before), and the
   `/private/tmp/lesson-demo` trust entry Mike accepted was removed from Muse's `trust.json`.
+- **`doc restore` (rollback without amnesia) and lesson library part 2** (branch
+  `hackathon/rollback-lessons`, Doc only; dmc unchanged).
+  - `doc restore <id>` previews dmc's restore in plain terms and asks before anything changes.
+    It applies through dmc's journaled restore and never forces a conflict or recovery. After an
+    apply it offers to draft a lesson and asks, optionally, what went wrong. `--yes` is for demos
+    only, and `--no-lesson` skips the lesson.
+  - `doc lesson draft --last-restore` finds the latest applied restore through dmc's existing
+    schema 1 JSON (`checkpoint list` operations), skipping one a later redo reapplied.
+  - Drafts now include the abandoned work as a redacted diff, built from `dmc checkpoint export`
+    of the before and after states in a temporary directory outside the workspace. Labels that
+    dmc truncated are marked as truncated.
+  - Verified by 9 tests in `doc/test/restore_cli_test.dart`: "no" changes nothing; "yes"
+    applies and drafts; a conflict is not forced; `--no-lesson`; `--last-restore` (including
+    after a redo); the abandoned diff is redacted; `--local` refuses hosted; a truncated label
+    is marked.
+  - Real check on the Mac, 2026-10-28:
+    1. A Claude Code turn in `/tmp/rollback-demo` made `parse_amount` return float dollars, and
+       `test_money.py` failed.
+    2. `doc restore` (answers piped in) restored `money.py`, and the tests passed again.
+    3. It drafted a lesson. That draft could only say the change was rolled back, which led to
+       the new "What went wrong?" question.
+    4. A redraft with `doc lesson draft --last-restore --note …` was approved and is listed in
+       `doc lessons`.
+
+    Cost: 2 Baseten calls, $0.0047.
+- Cleanup: stopped tracking `deploy/modal/__pycache__/` (now ignored), removed the Modal
+  workspace name from the docs, and defaulted `summary` to Baseten with a Fireworks fallback.
+  Modal Glimmer is an opt-in.
 
 ## In progress
 
@@ -252,6 +280,11 @@ Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library sessio
   (`deploy/modal/README.md`). No cold-start or warm latency has been measured yet. Glimmer is
   also not on this Mac (24 GiB, Apple M5; Ollama, LM Studio and llama.cpp are installed, but no
   Glimmer model).
+- The Modal workspace name is gone from the docs but still in the history of earlier commits
+  (`deploy/modal/README.md` and `STATUS.md` before `f8c2d8f`). Rewriting published history needs
+  Mike's decision.
+- Lesson drafts can only explain *why* a change failed if someone says so (the "What went
+  wrong?" answer or `--note`); dmc records what changed, not why.
 - **The Fireworks key was exposed once.** Before line 49 of `~/.zshrc` was fixed, a new zsh
   printed it in an error message, and that appeared in one tool output in this session. Mike
   should rotate the Fireworks key.
@@ -270,11 +303,10 @@ Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library sessio
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. Lesson library part 2: draft a lesson automatically after a `dmc checkpoint restore` (still
-   approved by hand).
-2. Then, per the spec's schedule: bisect (Oct 31; build on
+1. Time-travel bisect (Oct 31; build on
    `checkpoint export`, and set up ignored dependencies such as `node_modules` and `.dart_tool`
-   in each export, because export holds only protected files), push-to-talk voice
+   in each export, because export holds only protected files).
+2. Then, per the spec's schedule: push-to-talk voice
    (Nov 1), parallel timelines (Nov 1–2), demo and README (Nov 3), submit (Nov 4).
 
 ### Before the demo (optional)
@@ -288,6 +320,11 @@ Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
 
+- 2026-10-28 · Claude · Rollback lessons (branch `hackathon/rollback-lessons`): cleanup
+  (`__pycache__`, the Modal workspace name, `summary` defaulting to Baseten), `doc restore`,
+  `doc lesson draft --last-restore`, abandoned-work diffs and truncated-label markers. Verified
+  with tests and a real Claude Code → `doc restore` → approved lesson run ($0.0047). Left open:
+  the workspace name in old commits, and rotating the Fireworks key.
 - 2026-10-28 · Claude · Glimmer, Fireworks and lessons (branch `hackathon/glimmer-lessons`):
   fixed the Windows watcher-test flake, added the Modal app for Muse Glimmer (not deployed: no
   payment method), added Doc's `modal` and `fireworks` providers and fallbacks, and built lesson
