@@ -4,6 +4,8 @@ library;
 export 'src/cli.dart';
 export 'src/config.dart';
 export 'src/dmc_client.dart';
+export 'src/lesson_commands.dart';
+export 'src/lessons.dart';
 export 'src/model_client.dart';
 export 'src/model_router.dart';
 export 'src/redaction.dart';

@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'config.dart';
 import 'dmc_client.dart';
+import 'lesson_commands.dart';
 import 'model_client.dart';
 import 'model_router.dart';
 import 'summarize.dart';
@@ -28,6 +29,25 @@ Commands:
   summarize <checkpoint-id>        Summarize a checkpoint in plain English.
   usage                            Tokens and estimated cost per provider.
 
+  lesson draft <checkpoint-id> [--note "..."]
+                                   Draft a lesson from a checkpoint (workhorse
+                                   role). Files come from the checkpoint, not
+                                   the model. Saved as a draft.
+  lesson edit <draft>              Open a draft in \$VISUAL / \$EDITOR.
+  lesson approve <draft>           Validate a draft and add it to the library.
+  lesson reject <draft>            Delete a draft.
+  lesson show <id>                 Show one approved lesson.
+  lesson brief --task "<text>" [--files <path>...]
+                                   Match lessons by file overlap (a fixed rule)
+                                   and condense them into a brief (summary role).
+  lessons [--files <path>...]      List the library (approved lessons only).
+  lessons path                     Where this workspace's lessons are kept.
+  start <muse-code|claude-code> "<task>" [--files <path>...] [--yes]
+                                   Brief the agent from matching lessons, ask
+                                   before adding it, then launch the agent with
+                                   it as the first prompt. --yes skips the
+                                   question; use it only for scripted demos.
+
 Options:
   --dmc <path>                     The dmc executable (else DMC_BIN, then PATH).
   --workspace <dir>                The dmc workspace (default: current dir).
@@ -46,6 +66,10 @@ ArgParser _parser() => ArgParser()
   ..addFlag('show-prompt', negatable: false)
   ..addFlag('check', negatable: false)
   ..addFlag('available', negatable: false)
+  ..addOption('note')
+  ..addOption('task')
+  ..addMultiOption('files')
+  ..addFlag('yes', negatable: false)
   ..addFlag('help', abbr: 'h', negatable: false);
 
 /// Run Doc. Output goes to [out], diagnostics (retries, fallbacks, errors)
@@ -56,6 +80,7 @@ Future<int> runDoc(
   StringSink? out,
   StringSink? err,
   ChatClient? client,
+  String? Function()? readLine,
 }) async {
   final env = environment ?? Platform.environment;
   final stdoutSink = out ?? stdout;
@@ -103,7 +128,7 @@ Future<int> runDoc(
     roleProviders: overrides,
     log: log,
   );
-  final context = _Context(
+  final context = DocContext(
     args: args,
     env: env,
     config: config,
@@ -111,6 +136,7 @@ Future<int> runDoc(
     router: router,
     out: stdoutSink,
     log: log,
+    readLine: readLine ?? () => stdin.readLineSync(),
   );
 
   try {
@@ -121,6 +147,12 @@ Future<int> runDoc(
         return await _summarize(context);
       case 'usage':
         return _usage(context);
+      case 'lesson':
+        return await runLessonCommand(context);
+      case 'lessons':
+        return await runLessonsCommand(context);
+      case 'start':
+        return await runStartCommand(context);
       default:
         log('Unknown command "${args.rest.first}".\n\n$docUsage');
         return 2;
@@ -131,7 +163,8 @@ Future<int> runDoc(
   }
 }
 
-class _Context {
+/// What one Doc command run needs.
+class DocContext {
   final ArgResults args;
   final Map<String, String> env;
   final DocConfig config;
@@ -140,7 +173,10 @@ class _Context {
   final StringSink out;
   final void Function(String message) log;
 
-  const _Context({
+  /// Reads one line of the user's answer (for `doc start`'s question).
+  final String? Function() readLine;
+
+  const DocContext({
     required this.args,
     required this.env,
     required this.config,
@@ -148,7 +184,16 @@ class _Context {
     required this.router,
     required this.out,
     required this.log,
+    required this.readLine,
   });
+
+  /// The dmc workspace Doc works on: `--workspace`, else the current dir.
+  String get workspace => p.normalize(
+    p.absolute(args['workspace'] as String? ?? Directory.current.path),
+  );
+
+  Future<DmcClient> dmc() =>
+      DmcClient.locate(explicit: args['dmc'] as String?, environment: env);
 
   String keyStatus(ProviderConfig provider) => !provider.hosted
       ? 'no key needed'
@@ -160,7 +205,7 @@ class _Context {
 String _pad(String value, int width) =>
     value.length >= width ? '$value ' : value.padRight(width);
 
-Future<int> _models(_Context context) async {
+Future<int> _models(DocContext context) async {
   final out = context.out;
   out.writeln(
     'Config: ${context.configFile.path}${context.configFile.existsSync() ? '' : ' (not found; using defaults)'}',
@@ -224,7 +269,7 @@ Future<int> _models(_Context context) async {
         out.writeln('${provider.id} models (${ids.length}): ${ids.join(', ')}');
       } on ModelCallException catch (error) {
         out.writeln(
-          '${provider.id} models: ${_explain(error, provider, localOnly: context.router.localOnly)}',
+          '${provider.id} models: ${explainFailure(error, provider, localOnly: context.router.localOnly)}',
         );
       }
     }
@@ -252,7 +297,7 @@ Future<int> _models(_Context context) async {
       } on ModelCallException catch (error) {
         failed = true;
         out.writeln(
-          '${label}FAILED  ${_explain(error, provider, localOnly: context.router.localOnly)}',
+          '${label}FAILED  ${explainFailure(error, provider, localOnly: context.router.localOnly)}',
         );
       }
     }
@@ -264,7 +309,7 @@ String _short(String text) =>
     text.length > 60 ? '${text.substring(0, 60)}…' : text;
 
 /// A plain explanation of a failed call, with what to do next.
-String _explain(
+String explainFailure(
   ModelCallException error,
   ProviderConfig provider, {
   String? role,
@@ -286,7 +331,7 @@ String _explain(
   return error.message;
 }
 
-Future<int> _summarize(_Context context) async {
+Future<int> _summarize(DocContext context) async {
   final args = context.args;
   if (args.rest.length != 2) {
     context.log(
@@ -360,7 +405,7 @@ Future<int> _summarize(_Context context) async {
   } on ModelCallException catch (error) {
     final provider = context.config.providers[error.provider] ?? route.provider;
     context.log(
-      _explain(
+      explainFailure(
         error,
         provider,
         role: 'summary',
@@ -371,7 +416,7 @@ Future<int> _summarize(_Context context) async {
   }
 }
 
-int _usage(_Context context) {
+int _usage(DocContext context) {
   final usage = context.router.usage.read();
   context.out.writeln('Usage file: ${context.router.usage.file.path}');
   context.out.writeln(
