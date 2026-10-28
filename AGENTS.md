@@ -102,8 +102,19 @@ The most important product qualities are:
   running the dmc executable with `--json --schema-version 1` (found via `--dmc`, `DMC_BIN`, then
   `PATH`, and checked with `capabilities`, skipping Apple's `/usr/bin/dmc`). It never reads
   `.dmc/`, imports dmc's Dart code, or writes workspace files; it writes only `config.json` and
-  `usage.json` in its user config directory. Secrets are redacted before any hosted call. See
-  `doc/README.md`.
+  `usage.json` in its user config directory, and lessons in its user data directory (keyed by
+  dmc's workspace fingerprint). Secrets are redacted before any hosted call.
+- **Doc providers:** `meta` (Muse Spark 1.3, Muse Wonder), `baseten` (Muse Spark Open), `fireworks`
+  (Muse Spark Open backup), `modal` (Mike's private Muse Glimmer deployment in `deploy/modal/`;
+  base URL from the config or `DOC_MODAL_BASE_URL`, never committed) and `local` (this Mac).
+  Roles: `summary` modal → baseten, `workhorse` baseten → fireworks, `restore` meta → baseten;
+  every fallback is logged and there is no second hop. `--local` means this Mac only and refuses
+  Modal. Keys only from env vars (`MODEL_API_KEY`, `BASETEN_API_KEY`, `FIREWORKS_API_KEY`,
+  `MODAL_GLIMMER_KEY`). See `doc/README.md`.
+- **Lessons are Doc-only.** dmc never sees them. Matching is a fixed file-overlap rule; models only
+  draft lessons (workhorse) and condense briefs (summary). Nothing enters the library without
+  `doc lesson approve`, and a brief reaches an agent only after the user agrees (`--yes` is for
+  scripted demos).
 
 ---
 
@@ -279,7 +290,8 @@ Use `docs/TESTER-READINESS-AUDIT.md` as the original audit and the Phase 2/3 han
 ## Common Commands
 - Doc (from `doc/`): `dart run bin/doc.dart models [--check] [--available]`,
   `dart run bin/doc.dart summarize <checkpoint-id> [--local] [--show-prompt] [--role-provider summary=baseten]`,
-  `dart run bin/doc.dart usage`. Its gate: `dart pub get --enforce-lockfile`,
+  `dart run bin/doc.dart usage`, `dart run bin/doc.dart lesson draft|edit|approve|reject|show|brief`,
+  `dart run bin/doc.dart lessons [path]`, `dart run bin/doc.dart start <muse-code|claude-code> "<task>"`. Its gate: `dart pub get --enforce-lockfile`,
   `dart analyze --fatal-infos`, `DMC_TEST_BIN=../build/dmc/bundle/bin/dmc dart test --concurrency=1`.
 - `dart run bin/dmc.dart init`
 - `dart run bin/dmc.dart watch`

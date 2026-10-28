@@ -15,33 +15,38 @@ void main() {
   late List<String> logs;
   const metaKey = 'meta-test-key-000001';
   const basetenKey = 'baseten-test-key-0002';
-  const env = {'MODEL_API_KEY': metaKey, 'BASETEN_API_KEY': basetenKey};
+  const env = {
+    'MODEL_API_KEY': metaKey,
+    'BASETEN_API_KEY': basetenKey,
+    'FIREWORKS_API_KEY': 'fireworks-test-key-03',
+    'MODAL_GLIMMER_KEY': 'modal-test-key-000004',
+  };
 
+  /// The default providers, each pointed at a fake (or closed) URL.
+  /// [modal] null leaves Modal unconfigured, as on a machine without it.
   DocConfig config({
     required String meta,
     required String baseten,
     required String local,
+    String fireworks = 'http://127.0.0.1:9/v1',
+    String? modal,
     double metaBudget = 150,
   }) {
     final defaults = DocConfig.defaults();
-    ProviderConfig at(String id, String url, {double? budget}) {
-      final base = defaults.providers[id]!;
-      return ProviderConfig(
-        id: id,
-        baseUrl: url,
-        keyEnv: base.keyEnv,
-        defaultModel: base.defaultModel,
-        hosted: base.hosted,
-        prices: base.prices,
-        budgetUsd: budget ?? base.budgetUsd,
-        timeout: const Duration(seconds: 5),
-      );
-    }
+    ProviderConfig at(String id, String url, {double? budget}) =>
+        ProviderConfig.fromJson(id, {
+          ...defaults.providers[id]!.toJson(),
+          'baseUrl': url,
+          'budgetUsd': budget ?? defaults.providers[id]!.budgetUsd,
+          'timeoutSeconds': 5,
+        });
 
     return DocConfig(
       providers: {
         'meta': at('meta', meta, budget: metaBudget),
         'baseten': at('baseten', baseten),
+        'fireworks': at('fireworks', fireworks),
+        'modal': at('modal', modal ?? ''),
         'local': at('local', local),
       },
       roles: defaults.roles,
@@ -196,6 +201,7 @@ void main() {
           baseten: baseten.baseUrl,
           local: await closedBaseUrl(),
         ),
+        roleProviders: const {'summary': 'local'},
       ).call('summary', prompt),
       throwsA(
         isA<ModelCallException>().having(
@@ -309,5 +315,183 @@ void main() {
     expect(sent['content'], isNot(contains(secret)));
     expect(sent['content'], isNot(contains(metaKey)));
     expect(result.redactionCount, 2);
+  });
+
+  test(
+    'summary uses Muse Glimmer on Modal, unpriced, without a budget',
+    () async {
+      final modal = await FakeProvider.start([
+        FakeReply.chat('glimmer summary', prompt: 400, completion: 90),
+      ]);
+      addTearDown(modal.close);
+      final result = await router(
+        config(
+          meta: await closedBaseUrl(),
+          baseten: await closedBaseUrl(),
+          local: await closedBaseUrl(),
+          modal: modal.baseUrl,
+        ),
+      ).call('summary', prompt);
+      expect(result.result.content, 'glimmer summary');
+      expect(result.costUsd, 0);
+      expect(
+        modal.requests.single.authorization,
+        'Bearer modal-test-key-000004',
+      );
+      final body = modal.requests.single.body!;
+      expect(body['temperature'], 1.0);
+      expect(
+        ((body['messages'] as List).first as Map)['content'],
+        startsWith('Reasoning strength: low.'),
+      );
+      expect(usage.forProvider('modal').calls, 1);
+      expect(usage.forProvider('modal').completionTokens, 90);
+    },
+  );
+
+  test(
+    'Modal failing or not configured falls back to baseten, logged',
+    () async {
+      final modal = await FakeProvider.start([
+        const FakeReply(503, {'error': 'cold'}),
+      ]);
+      final baseten = await FakeProvider.start([
+        FakeReply.chat('spark open summary'),
+      ]);
+      addTearDown(modal.close);
+      addTearDown(baseten.close);
+      final failing = await router(
+        config(
+          meta: await closedBaseUrl(),
+          baseten: baseten.baseUrl,
+          local: await closedBaseUrl(),
+          modal: modal.baseUrl,
+        ),
+      ).call('summary', prompt);
+      expect(failing.fellBackFrom, 'modal');
+      expect(failing.result.content, 'spark open summary');
+      expect(modal.requests, hasLength(3));
+      expect(
+        logs.where(
+          (line) => line.startsWith('FALLBACK: role "summary" failed on modal'),
+        ),
+        hasLength(1),
+      );
+
+      logs.clear();
+      final unconfigured = await router(
+        config(
+          meta: await closedBaseUrl(),
+          baseten: baseten.baseUrl,
+          local: await closedBaseUrl(),
+        ),
+      ).call('summary', prompt);
+      expect(unconfigured.fellBackFrom, 'modal');
+      expect(logs.single, contains('no base URL is configured'));
+    },
+  );
+
+  test('DOC_MODAL_BASE_URL supplies the Modal endpoint', () async {
+    final modal = await FakeProvider.start([FakeReply.chat('from env url')]);
+    addTearDown(modal.close);
+    final result = await ModelRouter(
+      config: config(
+        meta: await closedBaseUrl(),
+        baseten: await closedBaseUrl(),
+        local: await closedBaseUrl(),
+      ),
+      environment: {...env, 'DOC_MODAL_BASE_URL': modal.baseUrl},
+      usage: usage,
+      client: ChatClient(maxRetries: 0, sleep: (_) async {}),
+      log: logs.add,
+    ).call('summary', prompt);
+    expect(result.result.content, 'from env url');
+    expect(result.fellBackFrom, isNull);
+  });
+
+  test(
+    'workhorse falls back from baseten to fireworks, and no further',
+    () async {
+      final baseten = await FakeProvider.start([
+        const FakeReply(500, {'error': 'x'}),
+      ]);
+      final fireworks = await FakeProvider.start([
+        FakeReply.chat('fireworks draft', prompt: 100, completion: 100),
+      ]);
+      addTearDown(baseten.close);
+      addTearDown(fireworks.close);
+      final result = await router(
+        config(
+          meta: await closedBaseUrl(),
+          baseten: baseten.baseUrl,
+          local: await closedBaseUrl(),
+          fireworks: fireworks.baseUrl,
+        ),
+      ).call('workhorse', prompt);
+      expect(result.fellBackFrom, 'baseten');
+      final sent = fireworks.requests.single;
+      expect(sent.body!['model'], fireworksSparkOpenModel);
+      expect(sent.body!['reasoning_effort'], 'low');
+      expect(sent.authorization, 'Bearer fireworks-test-key-03');
+      expect(result.costUsd, closeTo((100 * 1.25 + 100 * 4.25) / 1e6, 1e-12));
+      expect(
+        logs.where(
+          (line) =>
+              line.startsWith('FALLBACK: role "workhorse" failed on baseten'),
+        ),
+        hasLength(1),
+      );
+
+      // When the fallback fails too, its error surfaces: there is no chain.
+      final down = await FakeProvider.start([
+        const FakeReply(502, {'error': 'y'}),
+      ]);
+      addTearDown(down.close);
+      await expectLater(
+        router(
+          config(
+            meta: await closedBaseUrl(),
+            baseten: baseten.baseUrl,
+            local: await closedBaseUrl(),
+            fireworks: down.baseUrl,
+          ),
+        ).call('workhorse', prompt),
+        throwsA(
+          isA<ModelCallException>().having(
+            (e) => e.provider,
+            'provider',
+            'fireworks',
+          ),
+        ),
+      );
+    },
+  );
+
+  test('--local refuses Modal: it is not this Mac', () async {
+    final modal = await FakeProvider.start([FakeReply.chat('never')]);
+    addTearDown(modal.close);
+    final settings = config(
+      meta: await closedBaseUrl(),
+      baseten: await closedBaseUrl(),
+      local: await closedBaseUrl(),
+      modal: modal.baseUrl,
+    );
+    final routed = router(settings, localOnly: true);
+    expect(routed.resolve('summary').provider.id, 'local');
+    await expectLater(
+      routed.callProvider(
+        settings.providers['modal']!,
+        modalGlimmerModel,
+        prompt,
+      ),
+      throwsA(
+        isA<ModelCallException>().having(
+          (e) => e.kind,
+          'kind',
+          ModelCallFailure.refused,
+        ),
+      ),
+    );
+    expect(modal.requests, isEmpty);
   });
 }

@@ -14,14 +14,13 @@ void main() {
     log: logs.add,
   );
 
-  ProviderConfig provider(String id, String baseUrl) => ProviderConfig(
-    id: id,
-    baseUrl: baseUrl,
-    keyEnv: id == 'local' ? null : 'KEY',
-    defaultModel: 'fake-model',
-    hosted: id != 'local',
-    timeout: const Duration(seconds: 5),
-  );
+  /// A default provider with its request style, pointed at [baseUrl].
+  ProviderConfig provider(String id, String baseUrl) =>
+      ProviderConfig.fromJson(id, {
+        ...DocConfig.defaults().providers[id]!.toJson(),
+        'baseUrl': baseUrl,
+        'timeoutSeconds': 5,
+      });
 
   Map<String, Object?> body(ProviderConfig provider) => chatRequestBody(
     provider: provider,
@@ -208,9 +207,90 @@ void main() {
     expect(fake.requests.single.path, '/v1/models');
   });
 
+  test('Muse Glimmer requests use Meta\'s sampling and reasoning strength', () {
+    final body = chatRequestBody(
+      provider: provider('modal', 'http://unused/v1'),
+      model: 'muse-glimmer',
+      messages: const [
+        ChatMessage('system', 'You summarize.'),
+        ChatMessage('user', 'hi'),
+      ],
+      maxTokens: 300,
+    );
+    final messages = (body['messages'] as List).cast<Map>();
+    expect(
+      messages.first['content'],
+      'Reasoning strength: low.\nYou summarize.',
+    );
+    expect(messages, hasLength(2));
+    expect(body['temperature'], 1.0);
+    expect(body['top_p'], 0.95);
+    expect(body['top_k'], 64);
+    expect(body['max_tokens'], 300);
+    expect(body.containsKey('reasoning_effort'), isFalse);
+    final noSystem = chatRequestBody(
+      provider: provider('modal', 'http://unused/v1'),
+      model: 'muse-glimmer',
+      messages: const [ChatMessage('user', 'hi')],
+      maxTokens: 10,
+    );
+    expect(
+      ((noSystem['messages'] as List).first as Map)['content'],
+      'Reasoning strength: low.',
+    );
+  });
+
+  test('reasoning text left in an answer is stripped', () async {
+    expect(
+      stripReasoning(
+        '<|start|>assistant to=self<|message|>thinking<|eom|>'
+        '<|start|>assistant to=user<|message|>The answer.<|end|>',
+      ),
+      'The answer.',
+    );
+    expect(stripReasoning('<think>hmm</think>Plain'), 'Plain');
+    final fake = await FakeProvider.start([
+      FakeReply.chat('<think>private</think>Visible answer'),
+    ]);
+    addTearDown(fake.close);
+    final modal = provider('modal', fake.baseUrl);
+    final result = await client().complete(
+      provider: modal,
+      body: body(modal),
+      apiKey: 'modal-key-1234',
+    );
+    expect(result.content, 'Visible answer');
+  });
+
+  test('a slow first call prints the wake notice once', () async {
+    final fake = await FakeProvider.start([
+      FakeReply.chat('awake'),
+    ], delay: const Duration(milliseconds: 300));
+    addTearDown(fake.close);
+    final modal = provider('modal', fake.baseUrl);
+    final result = await ChatClient(
+      log: logs.add,
+      wakeAfter: const Duration(milliseconds: 50),
+    ).complete(provider: modal, body: body(modal), apiKey: 'modal-key-1234');
+    expect(result.content, 'awake');
+    expect(logs, [
+      'Waking Muse Glimmer on Modal (can take a couple of minutes)…',
+    ]);
+  });
+
   test('defaults route roles as specified', () {
     final config = DocConfig.defaults();
-    expect(config.roles['summary']!.provider, 'local');
+    expect(config.roles['summary']!.provider, 'modal');
+    expect(config.roles['summary']!.fallbackProvider, 'baseten');
+    expect(config.roles['workhorse']!.fallbackProvider, 'fireworks');
+    expect(config.roles['workhorse']!.fallbackModel, fireworksSparkOpenModel);
+    expect(config.providers['fireworks']!.budgetUsd, 100);
+    expect(config.providers['modal']!.billing, ProviderBilling.gpuTime);
+    expect(
+      config.providers['modal']!.timeout.inSeconds,
+      greaterThanOrEqualTo(300),
+    );
+    expect(config.providers['modal']!.label, 'modal (your private deployment)');
     expect(config.roles['workhorse']!.model, basetenSparkOpenModel);
     expect(config.roles['restore']!.fallbackProvider, 'baseten');
     expect(config.roles['planner']!.model, metaWonderModel);

@@ -51,11 +51,17 @@ class FakeProvider {
   final List<FakeReply> replies;
   final List<FakeRequest> requests = [];
 
-  FakeProvider._(this._server, this.replies);
+  /// How long each reply waits, to imitate a cold start.
+  final Duration delay;
 
-  static Future<FakeProvider> start(List<FakeReply> replies) async {
+  FakeProvider._(this._server, this.replies, this.delay);
+
+  static Future<FakeProvider> start(
+    List<FakeReply> replies, {
+    Duration delay = Duration.zero,
+  }) async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final fake = FakeProvider._(server, replies);
+    final fake = FakeProvider._(server, replies, delay);
     server.listen(fake._handle);
     return fake;
   }
@@ -76,6 +82,7 @@ class FakeProvider {
         replies[requests.length - 1 < replies.length
             ? requests.length - 1
             : replies.length - 1];
+    if (delay > Duration.zero) await Future<void>.delayed(delay);
     request.response.statusCode = reply.status;
     reply.headers.forEach(request.response.headers.set);
     request.response.headers.contentType = ContentType.json;

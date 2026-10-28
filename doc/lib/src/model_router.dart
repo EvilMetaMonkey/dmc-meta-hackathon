@@ -199,10 +199,12 @@ class ModelRouter {
           // budget.
           (error.retryable ||
               error.kind == ModelCallFailure.unreachable ||
-              error.kind == ModelCallFailure.badResponse);
+              error.kind == ModelCallFailure.badResponse ||
+              // A private deployment that is not set up on this machine.
+              error.kind == ModelCallFailure.notConfigured);
       if (!fallbackEligible) rethrow;
       log(
-        'FALLBACK: role "$role" failed on ${route.provider.id} (${route.model}): ${error.message}. Using the configured fallback ${fallback.id} (${route.fallbackModel}).',
+        'FALLBACK: role "$role" failed on ${route.provider.id} (${route.model}): ${error.message.replaceFirst(RegExp(r'\.$'), '')}. Using the configured fallback ${fallback.id} (${route.fallbackModel}).',
       );
       final result = await _callOn(
         route,
@@ -249,10 +251,19 @@ class ModelRouter {
         '--local refuses hosted calls; ${provider.id} was not called.',
       );
     }
+    final baseUrl = provider.resolvedBaseUrl(environment);
+    if (baseUrl.isEmpty) {
+      throw ModelCallException(
+        ModelCallFailure.notConfigured,
+        provider.id,
+        '${provider.id}: no base URL is configured. Set providers.${provider.id}.baseUrl in the config${provider.baseUrlEnv == null ? '' : ' or ${provider.baseUrlEnv}'}.',
+      );
+    }
+    provider = provider.withBaseUrl(baseUrl);
     String? key;
     ModelPrice? price;
-    if (provider.hosted) {
-      key = provider.keyEnv == null ? null : environment[provider.keyEnv];
+    if (provider.hosted && provider.keyEnv != null) {
+      key = environment[provider.keyEnv];
       if (key == null || key.isEmpty) {
         throw ModelCallException(
           ModelCallFailure.missingKey,
@@ -260,6 +271,8 @@ class ModelRouter {
           '${provider.id}: ${provider.keyEnv} is not set.',
         );
       }
+    }
+    if (provider.billing == ProviderBilling.tokens) {
       price = provider.prices[model];
       if (price == null) {
         throw ModelCallException(

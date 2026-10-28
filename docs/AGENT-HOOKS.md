@@ -170,6 +170,14 @@ compiled bundle), `muse exec "Create a file named hello.txt …" --disable-appro
 `dmc hooks uninstall --agent muse-code --apply` restored `~/.config/muse/settings.json` to its
 exact original bytes (same SHA-256).
 
+**Initial prompt in interactive mode (verified 1.4.14 on macOS, 2026-10-28).** `muse [OPTIONS]
+[PROMPT]` starts the TUI with `PROMPT` submitted as the first turn, the same shape as
+`claude "<prompt>"`. `doc start muse-code` relies on it: a real run's UserPromptSubmit hook
+(through dmc's checkpoint label) and the session transcript both showed the brief plus the task
+as the first prompt. The TUI needs a real terminal: started without a TTY, it waits on terminal
+capability queries (OSC colour queries, the kitty keyboard protocol), so scripts should use
+`muse exec` instead. Muse Code updated itself from 1.4.13 to 1.4.14 on 2026-10-27.
+
 **Session worktrees, `muse -w` (verified 1.4.13 on macOS, 2026-10-27).** `muse exec -w create
 …` (a bare `-w` means `create`) makes a **linked Git worktree inside the repository folder**:
 

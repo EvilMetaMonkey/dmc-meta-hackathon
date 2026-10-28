@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-27 by Claude (worktree check and Doc skeleton session)
+Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library session)
 
 ## Done
 
@@ -168,6 +168,66 @@ Last updated: 2026-10-27 by Claude (worktree check and Doc skeleton session)
   approval it was rewritten to `export MODEL_API_KEY='…'` without reading the value (backup:
   `~/.zshrc.backup-20261027-155542`, mode 600).
 
+- Windows watcher-test flake fixed (test only): `test/watcher_hardening_test.dart` ("real create,
+  rename, directory move and atomic replacement are captured") deleted `renamed.txt` while the
+  watcher could still have it open (errno 32 on run 40540474040). The delete now retries up to 20
+  times, 100 ms apart, before failing.
+- **Doc providers `modal` and `fireworks`** (branch `hackathon/glimmer-lessons`). Provider
+  request style is now configuration (reasoning effort, token-limit field, sampling, Glimmer's
+  `Reasoning strength:` system line), and reasoning text is stripped from answers.
+  - `modal`: Muse Glimmer on Mike's own Modal deployment. The base URL comes from the config or
+    `DOC_MODAL_BASE_URL` and the key from `MODAL_GLIMMER_KEY`. It has a 600 s timeout, a wake
+    notice after 10 s, and is billed by GPU time.
+  - `fireworks`: `accounts/fireworks/models/muse-spark-open`, verified with `GET /models`;
+    serverless at $1.25 / $4.25 per million tokens.
+  - Roles: `summary` modal → baseten, `workhorse` baseten → fireworks, always logged, no second
+    hop. `--local` refuses Modal.
+  - Verified by Doc tests with fake providers (fallback chains, an unconfigured Modal,
+    `DOC_MODAL_BASE_URL`, `--local` refusing Modal, the wake notice, reasoning stripping).
+  - A real `doc models --check` on 2026-10-27: Fireworks ok in 4.2 s (151 in / 54 out, $0.0004),
+    Baseten in 1.1 s, meta in 1.4 s.
+- **Modal app for Muse Glimmer 30B** (`deploy/modal/glimmer.py` and its README), written but not
+  deployed (see Broken).
+  - Serving: Meta's official `meta-models/Muse-Glimmer-30B` (pinned `cec94fc…`) on vLLM 0.28.0
+    with the `muse_glimmer` reasoning and tool parsers, per the official vLLM recipe. One L40S,
+    FP8 at load, 32k context, text only.
+  - Operation: weights cached in a Modal Volume; scales to zero after 5 idle minutes, with at
+    most 1 container; bearer key from a Modal Secret.
+  - Set up on the Mac: the Modal CLI 1.6.3 (workspace `mikeishermes`), the
+    `muse-glimmer-api-key` secret, the two Volumes (empty), and `MODAL_GLIMMER_KEY` in
+    `~/.zshrc` (never printed).
+- **Lesson library, part 1** (Doc only). Markdown lessons with YAML front matter live in Doc's
+  data dir, keyed by dmc's workspace fingerprint; drafts are kept apart. Commands: `doc lesson
+  draft | edit | approve | reject | show | brief`, `doc lessons [--files] | path`, and `doc start
+  <muse-code|claude-code> "<task>" [--yes]`. Matching is a fixed rule (exact path or unique
+  basename, plus `--files`; score = file overlap; ties go to the newest; top 3).
+  - Verified by 13 new Doc tests: front matter round trip, approval rules, matching cases,
+    first-prompt composition, draft redaction, `--show-prompt` and `--local`, brief skipped on no
+    match, and `start` with a fake agent for yes, no and no match.
+  - Verified end to end in `/tmp/lesson-demo`:
+    1. A real Claude Code turn made `apply_discount` take a 0–1 fraction, so `checkout.py`
+       printed -1920.0.
+    2. `dmc checkpoint restore --apply` brought back 60.0.
+    3. `doc lesson draft` (Baseten) wrote the lesson, with files `[pricing.py]` from the
+       checkpoint. One phrase was corrected by hand, as `doc lesson edit` allows, then the lesson
+       was approved.
+    4. Mike ran `doc start muse-code "Add a bulk_discount function to pricing.py …" --yes` in a
+       real terminal. Muse Code's first prompt was the brief, a blank line, then the task (seen in
+       its transcript and its dmc checkpoint label). Muse kept the 0–100 contract.
+
+    The brief came from Baseten through the logged `summary` fallback, since Modal is not up.
+- PR #6 (`hackathon/glimmer-lessons`): CI passed on ubuntu, macOS, macOS Intel and Windows in both
+  the push and pull_request runs for `0256ab8`. dmc ran 223 tests (Windows 221 plus 2 skipped)
+  and Doc 63 on every platform.
+- Muse Code takes an initial interactive prompt as `muse "<prompt>"` (verified on 1.4.14;
+  recorded in `docs/AGENT-HOOKS.md`).
+- Mike's `~/.zshrc` lines 46 (Meta key) and 49 (Fireworks key) were not shell assignments. With
+  his approval they were rewritten to `export MODEL_API_KEY='…'` and
+  `export FIREWORKS_API_KEY='…'` without reading the values (backup:
+  `~/.zshrc.backup-20261027-204740`, mode 600).
+- Demo cleanup: Muse's `settings.json` hooks were uninstalled (same SHA-256 as before), and the
+  `/private/tmp/lesson-demo` trust entry Mike accepted was removed from Muse's `trust.json`.
+
 ## In progress
 
 - Nothing yet.
@@ -182,19 +242,18 @@ Last updated: 2026-10-27 by Claude (worktree check and Doc skeleton session)
   watcher. Not by legacy file restores (`dmc undo|restore|redo <file>`, `--burst`), which never
   consulted ignore rules, and not by `checkpoint recover --resume|--rollback`, which finishes an
   already-journaled operation.
-- Windows CI flake in an older test, not caused by this branch (which does not touch the
-  watcher): `test/watcher_hardening_test.dart:155` ("real create, rename, directory move and atomic
-  replacement are captured") failed once with `PathAccessException ... renamed.txt ... errno = 32`
-  (the test deleted a file the watcher still had open). Seen on run 40540474040 (push, `8087f08`,
-  a STATUS-only commit); the pull_request run of the same commit passed, and rerunning the failed
-  job passed. Not fixed; a retry around the delete in the test would likely cure it.
 - Git mode on Windows is verified only by CI (`windows-latest`), not on a real Windows machine.
-- Muse Glimmer is not available locally. The Mac has 24 GiB of memory (`hw.memsize`
-  25,769,803,776, Apple M5). Ollama (`/usr/local/bin/ollama`, serving on 11434), llama.cpp
-  (`llama-server`, `llama-cli` in `/opt/homebrew/bin`) and LM Studio (serving on 1234) are
-  installed; a vMLX server is on 8080. None has a Muse Glimmer model, so the `summary` role (local
-  by default) fails with a clear 404 message until Glimmer is loaded or
-  `--role-provider summary=baseten` is used. Nothing was downloaded.
+- **Muse Glimmer on Modal is not deployed.** Modal refused the app: "Please add a payment method
+  to use L40S GPU functions" (a card is required for any GPU, even with credit). Mike chose not
+  to add one now. Until then, the `summary` role (summaries and lesson briefs) falls back to
+  Baseten Muse Spark Open, logged every time. Also untested: whether vLLM's on-the-fly FP8 fits
+  the 60 GB BF16 checkpoint on a 48 GB L40S. If it does not, use one A100-80GB with BF16
+  (`deploy/modal/README.md`). No cold-start or warm latency has been measured yet. Glimmer is
+  also not on this Mac (24 GiB, Apple M5; Ollama, LM Studio and llama.cpp are installed, but no
+  Glimmer model).
+- **The Fireworks key was exposed once.** Before line 49 of `~/.zshrc` was fixed, a new zsh
+  printed it in an error message, and that appeared in one tool output in this session. Mike
+  should rotate the Fireworks key.
 - One unexplained Doc test failure: during the final gates on the Mac, one
   `dart test --concurrency=1` run in `doc/` reported a failure (the output was cut to its last
   line, so the failing test is unknown). It did not reproduce in 15 later runs, including the same
@@ -210,9 +269,14 @@ Last updated: 2026-10-27 by Claude (worktree check and Doc skeleton session)
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. Get Muse Glimmer running locally (it fits in 24 GiB), set `providers.local.defaultModel` to
-   its name, and rerun `doc summarize` with the default local `summary` role.
-2. Then, per the spec's schedule: lesson library (Oct 29–30), bisect (Oct 31; build on
+1. When Mike adds a payment method on Modal:
+   - run `modal run deploy/modal/glimmer.py::download` and `modal deploy deploy/modal/glimmer.py`;
+   - put the URL in `~/.config/dmc-doc/config.json`;
+   - run `doc models --check` twice (cold, then warm), record the latencies in `doc/README.md`,
+     and confirm it scales to zero.
+2. Lesson library part 2: draft a lesson automatically after a `dmc checkpoint restore` (still
+   approved by hand).
+3. Then, per the spec's schedule: bisect (Oct 31; build on
    `checkpoint export`, and set up ignored dependencies such as `node_modules` and `.dart_tool`
    in each export, because export holds only protected files), push-to-talk voice
    (Nov 1), parallel timelines (Nov 1–2), demo and README (Nov 3), submit (Nov 4).
@@ -221,6 +285,11 @@ Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
 
+- 2026-10-28 · Claude · Glimmer, Fireworks and lessons (branch `hackathon/glimmer-lessons`):
+  fixed the Windows watcher-test flake, added the Modal app for Muse Glimmer (not deployed: no
+  payment method), added Doc's `modal` and `fireworks` providers and fallbacks, and built lesson
+  library part 1 with `doc start`. Verified with tests and a real Claude Code → restore → lesson →
+  Muse Code run. Left open: the Modal deployment, and rotating the Fireworks key.
 - 2026-10-27 · Claude · Worktree check and Doc skeleton (branch `hackathon/doc-skeleton`):
   probed `muse -w`, kept agent hooks inside their own work tree, added worktree reporting to
   status and doctor, and built the `doc/` package: model client, redaction, router, and the
