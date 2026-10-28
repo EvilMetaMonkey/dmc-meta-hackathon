@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'config.dart';
 import 'dmc_client.dart';
+import 'bisect_command.dart';
 import 'lesson_commands.dart';
 import 'restore_command.dart';
 import 'model_client.dart';
@@ -30,6 +31,14 @@ Commands:
   summarize <checkpoint-id>        Summarize a checkpoint in plain English.
   usage                            Tokens and estimated cost per provider.
 
+  bisect --test "<command>" [--setup "<command>"] [--link <dir>]... [--from <cp>]
+         [--to <cp>] [--all] [--timeout <s>] [--keep] [--no-explain] [--json]
+                                   Find the agent turn where the tests started
+                                   failing, by testing exported checkpoint
+                                   states (never the working copy). Offers a
+                                   restore afterwards; --yes answers yes to the
+                                   setup and restore questions (scripted demos
+                                   only).
   restore <checkpoint-id> [--yes] [--no-lesson]
                                    Preview dmc's restore of a checkpoint, ask,
                                    apply it through dmc, then offer to draft a
@@ -79,6 +88,16 @@ ArgParser _parser() => ArgParser()
   ..addFlag('yes', negatable: false)
   ..addFlag('last-restore', negatable: false)
   ..addFlag('no-lesson', negatable: false)
+  ..addOption('test')
+  ..addOption('setup')
+  ..addMultiOption('link', splitCommas: false)
+  ..addOption('from')
+  ..addOption('to')
+  ..addFlag('all', negatable: false)
+  ..addOption('timeout')
+  ..addFlag('keep', negatable: false)
+  ..addFlag('no-explain', negatable: false)
+  ..addFlag('json', negatable: false)
   ..addFlag('help', abbr: 'h', negatable: false);
 
 /// Run Doc. Output goes to [out], diagnostics (retries, fallbacks, errors)
@@ -164,6 +183,8 @@ Future<int> runDoc(
         return await runStartCommand(context);
       case 'restore':
         return await runRestoreCommand(context);
+      case 'bisect':
+        return await runBisectCommand(context);
       default:
         log('Unknown command "${args.rest.first}".\n\n$docUsage');
         return 2;
