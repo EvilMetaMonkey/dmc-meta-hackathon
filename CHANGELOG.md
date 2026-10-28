@@ -1,5 +1,14 @@
 ## Unreleased — Meta AI Developer Hackathon 2026
 
+- Add natural-language restore: `doc restore "<request>"` (for example "take me back to before it touched auth"). A checkpoint ID keeps the existing flow.
+  - The `restore` role (Muse Spark 1.3, logged Baseten fallback) sees the most recent closed checkpoints (default 30, `--limit`): id, time, agent, session, label (marked when dmc truncated it) and changed paths, never contents, redacted. It answers `{mode, checkpoint_id, confidence, reason, alternatives}` as JSON, with a `response_format` schema where the provider accepts it (Meta and Baseten do) and strict parsing with one retry.
+  - `planNaturalRestore` (pure) refuses any id that was not offered. `undo_turn` restores one checkpoint; `go_back_before` restores it and every later one, newest first. Already-undone checkpoints are skipped. Below 0.6 confidence, or with alternatives, the user picks or cancels, and `--yes` never answers that.
+  - Every step is previewed with `dmc checkpoint restore`, and `combineStepPreviews` (pure) combines them into one plan with +/− line counts (from `dmc checkpoint export`; `--diff` for full diffs), skipped files and conflicts, following each file through the steps. Any conflict stops it.
+  - One confirmation applies the steps through dmc. A failure stops, lists the applied steps and any `checkpoint recover` command, and offers `dmc checkpoint redo` for the applied steps in reverse order. Then a lesson is offered for the oldest undone turn, with the others as context. `--json`, `--show-prompt` and `--local` work as elsewhere.
+- Deploy Muse Glimmer 30B on Modal (one L40S, FP8, vLLM 0.28.0; cold start 94 s, warm about 2.2 s) and make it the `summary` role's default again, with a logged Baseten fallback.
+- Fix Doc's request bodies: send a Content-Length instead of chunked encoding, which Modal's web proxy rejected with HTTP 500.
+- A fallback provider whose key is missing or rejected (HTTP 401/403) is now reported as unavailable and skipped, and the primary provider's error is reported. `doc models --check` says "fireworks unavailable" and does not fail when Fireworks is only a fallback.
+- Add a bisect test proving that cleanup with `--link` removes only the link: the linked folder and its files survive on success and failure.
 - Add `doc bisect --test "<command>"` (time-travel bisect). It tests exported checkpoint states, never the working copy, to find the first agent turn after which the tests fail.
   - Candidates are closed agent turns from `dmc checkpoint list` (`--all`, `--from`, `--to`); invalid checkpoints are skipped. Both ends are checked first, then a binary search runs (about log2(n) probes), in a pure, tested function.
   - Each probe is a `dmc checkpoint export` into a temporary folder, with optional `--setup`, a per-probe `--timeout` (a timeout is a failure), and `--link` for ignored dependency folders. Temporary folders are removed unless `--keep`.

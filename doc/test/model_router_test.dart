@@ -50,7 +50,7 @@ void main() {
         'modal': at('modal', modal ?? ''),
         'local': at('local', local),
       },
-      // The documented opt-in: summary on Modal, falling back to Baseten.
+      // Summary on Modal, falling back to Baseten (now also the default).
       roles: summaryOnModal
           ? {...defaults.roles, 'summary': modalSummaryRole}
           : defaults.roles,
