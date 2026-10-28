@@ -216,6 +216,9 @@ Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library sessio
        its transcript and its dmc checkpoint label). Muse kept the 0–100 contract.
 
     The brief came from Baseten through the logged `summary` fallback, since Modal is not up.
+- PR #6 (`hackathon/glimmer-lessons`): CI passed on ubuntu, macOS, macOS Intel and Windows in both
+  the push and pull_request runs for `0256ab8`. dmc ran 223 tests (Windows 221 plus 2 skipped)
+  and Doc 63 on every platform.
 - Muse Code takes an initial interactive prompt as `muse "<prompt>"` (verified on 1.4.14;
   recorded in `docs/AGENT-HOOKS.md`).
 - Mike's `~/.zshrc` lines 46 (Meta key) and 49 (Fireworks key) were not shell assignments. With
