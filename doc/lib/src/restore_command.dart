@@ -16,7 +16,13 @@ Future<int> runRestoreCommand(DocContext context) async {
     context.log('Usage: doc restore <checkpoint-id> [--yes] [--no-lesson]');
     return 2;
   }
-  final id = rest[1];
+  return restoreCheckpoint(context, rest[1]);
+}
+
+/// The `doc restore` flow for checkpoint [id]: dmc's preview in plain
+/// terms, a question, dmc's journaled apply, then the lesson offer. Used by
+/// `doc restore` and offered after `doc bisect`.
+Future<int> restoreCheckpoint(DocContext context, String id) async {
   final yes = context.args['yes'] as bool;
   final DmcClient dmc;
   try {

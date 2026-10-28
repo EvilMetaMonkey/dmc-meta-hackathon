@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-28 by Claude (rollback lessons session)
+Last updated: 2026-10-28 by Claude (bisect session)
 
 ## Done
 
@@ -258,6 +258,44 @@ Last updated: 2026-10-28 by Claude (rollback lessons session)
 - Cleanup: stopped tracking `deploy/modal/__pycache__/` (now ignored), removed the Modal
   workspace name from the docs, and defaulted `summary` to Baseten with a Fireworks fallback.
   Modal Glimmer is an opt-in.
+- PR #8 (`hackathon/bisect`): CI passed on ubuntu, macOS, macOS Intel and Windows in both the push
+  and pull_request runs for `97179b8`. dmc ran 223 tests (Windows 221 plus 2 skipped) and Doc 88
+  on every platform. The `macos-latest` jobs were first cancelled after waiting 15 minutes for a
+  runner (no steps ran); rerunning them passed.
+- Fixed a Doc test flake seen on `6f3503c` (macos-latest, push run): `cli_test.dart` asserted the
+  summarize prompt did not contain `abc`, the fake `.env` value, but a random checkpoint ID
+  (`…23cabcd3a866`) contained it. The fixture now uses a value that lowercase hex cannot contain.
+- **`doc bisect` (time-travel bisect)** (branch `hackathon/bisect`, Doc only; dmc unchanged).
+  - What it does: finds the first agent turn after which `--test` fails, by testing
+    `dmc checkpoint export` states in temporary folders, never the working copy. It checks both
+    ends first, then runs a pure binary search (`bisectFirstBad`). It supports `--setup`,
+    `--link`, `--timeout` (a timeout is a failure), `--from`/`--to`/`--all` and `--keep`.
+  - Output: the first bad turn, the last good point, the failing output tail and a workhorse
+    explanation (unless `--no-explain`). Then a restore is offered through the `doc restore`
+    flow. `--json` prints one result object.
+  - Verified by 3 pure tests and 12 CLI tests with a compiled dmc and fake providers:
+    - first bad turn in the middle, first and last;
+    - both-ends checks, with no model call;
+    - invalid checkpoints skipped;
+    - a timeout counted as a failure;
+    - `--link`, `--setup`, and a suggested setup never run without a yes;
+    - temporary folders removed on success, on failure and on a crashing test;
+    - the working copy byte-identical afterwards;
+    - a failed explanation still printing the result;
+    - `--local` refusing hosted providers;
+    - the JSON shape;
+    - an accepted restore.
+  - Real check on the Mac, 2026-10-28: six real turns in a `/tmp` Python repo, alternating
+    Claude Code (1, 3, 5) and Muse Code `muse exec` (2, 4, 6). Turn 3 made `round_money` round to
+    one decimal.
+    - `doc bisect --test "python3 -m unittest -q"` found turn 3 in 5 probes (probes 0.2 s, run
+      5 s).
+    - The explanation was correct.
+    - The accepted restore put back `money.py`, and all 6 tests passed with the later turns
+      intact.
+    - Cost: one Baseten call, $0.0029.
+    - Afterwards both hooks were uninstalled (Muse `settings.json` back to the same SHA-256) and
+      the repo was removed.
 
 ## In progress
 
@@ -286,6 +324,11 @@ Last updated: 2026-10-28 by Claude (rollback lessons session)
 - The Modal workspace name is gone from the docs but still in the history of earlier commits
   (`deploy/modal/README.md` and `STATUS.md` before `f8c2d8f`). Rewriting published history needs
   Mike's decision.
+- Bisect assumes that once the tests fail, they keep failing until the end. It tests agent-turn
+  states only, so edits made by hand between turns are not probed on their own. On POSIX, a
+  timed-out test command is killed through its shell, and processes it started may outlive it.
+  Some bisect CLI tests (timeout, `--link`, a crashing command) are POSIX-only; Windows CI covers
+  the rest.
 - Lesson drafts can only explain *why* a change failed if someone says so (the "What went
   wrong?" answer or `--note`); dmc records what changed, not why.
 - **The Fireworks key was exposed once.** Before line 49 of `~/.zshrc` was fixed, a new zsh
@@ -306,9 +349,8 @@ Last updated: 2026-10-28 by Claude (rollback lessons session)
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. Time-travel bisect (Oct 31; build on
-   `checkpoint export`, and set up ignored dependencies such as `node_modules` and `.dart_tool`
-   in each export, because export holds only protected files).
+1. Natural-language restore ("take me back to before it touched auth"), always with dmc's
+   preview and a confirmation step, through the `doc restore` flow.
 2. Then, per the spec's schedule: push-to-talk voice
    (Nov 1), parallel timelines (Nov 1–2), demo and README (Nov 3), submit (Nov 4).
 
@@ -323,6 +365,10 @@ Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
 
+- 2026-10-28 · Claude · Bisect (branch `hackathon/bisect`): `doc bisect` with a pure search,
+  export-based probes, setup/link handling, an explanation and the restore offer. Verified with
+  tests and a real six-turn Claude Code + Muse Code run (5 probes, $0.0029). Nothing left
+  half-done.
 - 2026-10-28 · Claude · Rollback lessons (branch `hackathon/rollback-lessons`): cleanup
   (`__pycache__`, the Modal workspace name, `summary` defaulting to Baseten), `doc restore`,
   `doc lesson draft --last-restore`, abandoned-work diffs and truncated-label markers. Verified

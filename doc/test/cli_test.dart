@@ -48,7 +48,10 @@ void main() {
         ((begin['data'] as Map)['checkpoint'] as Map)['id'] as String;
     File(p.join(workspace.path, 'app.dart')).writeAsStringSync('v2');
     File(p.join(workspace.path, 'old.txt')).deleteSync();
-    File(p.join(workspace.path, '.env')).writeAsStringSync('API_TOKEN=abc');
+    // A value no checkpoint ID or hash can contain (they are lowercase hex).
+    File(
+      p.join(workspace.path, '.env'),
+    ).writeAsStringSync('API_TOKEN=not-hex-zq-secret');
     final close = await dmcJson(['checkpoint', 'close', checkpointId]);
     expect(close['ok'], isTrue, reason: '$close');
   });
@@ -197,7 +200,7 @@ void main() {
         '- .env: created (secret-bearing file name; contents never sent)',
       ),
     );
-    expect(user, isNot(contains('abc')));
+    expect(user, isNot(contains('not-hex-zq-secret')));
     expect(sent.body!.containsKey('max_tokens'), isTrue);
     // Doc never writes workspace files.
     expect(_tree(workspace), before);

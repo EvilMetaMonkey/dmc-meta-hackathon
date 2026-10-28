@@ -1,5 +1,9 @@
 ## Unreleased — Meta AI Developer Hackathon 2026
 
+- Add `doc bisect --test "<command>"` (time-travel bisect). It tests exported checkpoint states, never the working copy, to find the first agent turn after which the tests fail.
+  - Candidates are closed agent turns from `dmc checkpoint list` (`--all`, `--from`, `--to`); invalid checkpoints are skipped. Both ends are checked first, then a binary search runs (about log2(n) probes), in a pure, tested function.
+  - Each probe is a `dmc checkpoint export` into a temporary folder, with optional `--setup`, a per-probe `--timeout` (a timeout is a failure), and `--link` for ignored dependency folders. Temporary folders are removed unless `--keep`.
+  - The result names the first bad turn, the last good point and the failing output. The workhorse role explains it from the redacted diff (unless `--no-explain`), then a restore is offered through the `doc restore` flow. `--json` prints one result object; `--yes` is for scripted demos only.
 - Add `doc restore <checkpoint-id> [--yes] [--no-lesson]` (rollback without amnesia). It previews dmc's checkpoint restore in plain terms, asks, applies it through dmc's journaled restore, and never forces a conflict or interrupted restore. It then offers to draft a lesson from the undone work and asks, optionally, what went wrong. `--yes` is for scripted demos only.
 - Add `doc lesson draft --last-restore`: it drafts from the most recent applied restore, found through dmc's existing schema 1 JSON (`checkpoint list` operations), skipping a restore that a later redo reapplied. No dmc change.
 - Lesson drafts now include the abandoned work as a redacted line diff, built from `dmc checkpoint export` of the before and after states in a temporary directory outside the workspace. A label dmc truncated is marked as truncated, and the model is told never to quote or complete it.
