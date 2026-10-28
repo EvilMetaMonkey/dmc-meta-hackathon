@@ -139,7 +139,7 @@ void main() {
         'price.txt': 'percent 0-1\n',
         'new.txt': 'made by the turn\n',
       });
-      answers.addAll(['y', '']);
+      answers.addAll(['y', '', 'Callers still pass 25 for 25%']);
       expect(await doc(['restore', id]), 0, reason: '$err');
       final text = '$out';
       expect(text, contains('  - new.txt: delete it (the turn created it)'));
@@ -160,6 +160,11 @@ void main() {
         contains('--- price.txt (modified)\n-percent 0-100\n+percent 0-1'),
       );
       expect(prompt, contains('--- new.txt (created)\n+made by the turn'));
+      expect(
+        text,
+        contains('What went wrong? (optional, press Enter to skip) '),
+      );
+      expect(prompt, contains('User note: Callers still pass 25 for 25%'));
     },
   );
 

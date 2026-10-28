@@ -149,9 +149,16 @@ Future<int> runRestoreCommand(DocContext context) async {
     out.writeln('No lesson drafted. You can still run: doc lesson draft $id');
     return 0;
   }
+  // Only the person who undid the work knows why; ask once (optional).
+  var note = context.args['note'] as String?;
+  if (note == null && !yes) {
+    out.write('What went wrong? (optional, press Enter to skip) ');
+    final answer = context.readLine()?.trim();
+    if (answer != null && answer.isNotEmpty) note = answer;
+  }
   // The restore itself succeeded: a failed draft is reported on stderr and
   // does not change the exit code.
-  await draftLesson(context, id, note: context.args['note'] as String?);
+  await draftLesson(context, id, note: note);
   return 0;
 }
 
