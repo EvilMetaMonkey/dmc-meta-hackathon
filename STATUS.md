@@ -168,6 +168,11 @@ Last updated: 2026-10-27 by Claude (worktree check and Doc skeleton session)
   approval it was rewritten to `export MODEL_API_KEY='…'` without reading the value (backup:
   `~/.zshrc.backup-20261027-155542`, mode 600).
 
+- Windows watcher-test flake fixed (test only): `test/watcher_hardening_test.dart` ("real create,
+  rename, directory move and atomic replacement are captured") deleted `renamed.txt` while the
+  watcher could still have it open (errno 32 on run 40540474040). The delete now retries up to 20
+  times, 100 ms apart, before failing.
+
 ## In progress
 
 - Nothing yet.
@@ -182,12 +187,6 @@ Last updated: 2026-10-27 by Claude (worktree check and Doc skeleton session)
   watcher. Not by legacy file restores (`dmc undo|restore|redo <file>`, `--burst`), which never
   consulted ignore rules, and not by `checkpoint recover --resume|--rollback`, which finishes an
   already-journaled operation.
-- Windows CI flake in an older test, not caused by this branch (which does not touch the
-  watcher): `test/watcher_hardening_test.dart:155` ("real create, rename, directory move and atomic
-  replacement are captured") failed once with `PathAccessException ... renamed.txt ... errno = 32`
-  (the test deleted a file the watcher still had open). Seen on run 40540474040 (push, `8087f08`,
-  a STATUS-only commit); the pull_request run of the same commit passed, and rerunning the failed
-  job passed. Not fixed; a retry around the delete in the test would likely cure it.
 - Git mode on Windows is verified only by CI (`windows-latest`), not on a real Windows machine.
 - Muse Glimmer is not available locally. The Mac has 24 GiB of memory (`hw.memsize`
   25,769,803,776, Apple M5). Ollama (`/usr/local/bin/ollama`, serving on 11434), llama.cpp

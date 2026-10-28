@@ -39,6 +39,20 @@ class AlwaysChangingStore extends SnapshotStore {
   }
 }
 
+/// Delete [file], retrying briefly: on Windows the watcher may still have
+/// it open for a capture (errno 32, "used by another process").
+Future<void> deleteWithRetry(File file) async {
+  for (var attempt = 1; ; attempt++) {
+    try {
+      file.deleteSync();
+      return;
+    } on FileSystemException {
+      if (attempt >= 20) rethrow;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
+}
+
 void main() {
   late Directory root;
   late DmcPaths paths;
@@ -152,7 +166,7 @@ void main() {
             db.getLatestSnapshot(p.join('nested', 'child.txt'))?.hash ==
                 tombstoneHash,
       );
-      moved.deleteSync();
+      await deleteWithRetry(moved);
       await eventually(
         () => db.getLatestSnapshot('renamed.txt')?.hash == tombstoneHash,
       );
