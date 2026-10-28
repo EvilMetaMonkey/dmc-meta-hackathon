@@ -390,7 +390,12 @@ Update all callers together with the implementation, or maintain backward compat
 
 **Drafting.** `doc lesson draft` sends dmc's `checkpoint show` and `checkpoint diff` facts (and
 the note), redacted, to the workhorse role, which writes a title and the three sections (at most
-150 words). `files` always comes from the checkpoint's changed paths, never from the model. The
+150 words). The title describes the work that was undone, never a rule. **Without a note the
+reason is unknown:** the prompt says so ("Reason it was undone: not stated … Do not guess"),
+Doc writes "Why it failed" as "Not stated — add the reason before approving." whatever the
+model answered, and `doc lesson approve` refuses the draft until that line is edited. (A real
+draft after a natural-language restore had been titled "Do not modify protected auth.py",
+inventing a reason for undoing what was a good security fix.) `files` always comes from the checkpoint's changed paths, never from the model. The
 saved title and body are redacted again, and `approve` refuses anything that still looks like a
 secret.
 

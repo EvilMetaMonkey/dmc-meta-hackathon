@@ -178,6 +178,53 @@ void main() {
     expect('$out', contains('Drafts waiting for approval (not matched)'));
   });
 
+  test('without a note the reason is unknown: the prompt says so, the draft '
+      'says "Not stated" and cannot be approved until it is edited', () async {
+    // The model invents a reason anyway; Doc replaces it.
+    const invented =
+        'Title: Do not modify protected app.py\n'
+        '## What was tried\nThe agent changed app.py.\n'
+        '## Why it failed\napp.py is protected and must never change.\n'
+        '## What to do instead\nLeave app.py alone.';
+    final baseten = await FakeProvider.start([FakeReply.chat(invented)]);
+    addTearDown(baseten.close);
+    writeConfig({'baseten': baseten.baseUrl});
+    expect(await doc(['lesson', 'draft', checkpointId]), 0, reason: '$err');
+    final messages = baseten.requests.single.body!['messages'] as List;
+    final system = (messages[0] as Map)['content'] as String;
+    final sent = (messages[1] as Map)['content'] as String;
+    expect(
+      sent,
+      contains(
+        'Reason it was undone: not stated. Nobody said why this work was '
+        'undone, and the facts do not show it. Do not guess. Under '
+        '"## Why it failed" write exactly: $unstatedReason',
+      ),
+    );
+    expect(sent, isNot(contains('User note:')));
+    expect(system, contains('never a rule, and never a reason'));
+    expect(system, contains('never guess or infer one'));
+    final text = '$out';
+    expect(text, contains('## Why it failed\n$unstatedReason\n'));
+    expect(text, isNot(contains('must never change')));
+    final path = RegExp(r'Draft saved: (.*\.md)').firstMatch(text)![1]!;
+    final id = RegExp(r'([^/\\]+)\.md$').firstMatch(path)![1]!;
+    expect(await doc(['lesson', 'approve', id]), 1);
+    expect('$err', contains('still says the reason is not stated'));
+
+    // With a note, the note is the reason and nothing is replaced.
+    out.clear();
+    expect(
+      await doc(['lesson', 'draft', checkpointId, '--note', 'Callers broke']),
+      0,
+    );
+    final withNote =
+        ((baseten.requests.last.body!['messages'] as List)[1] as Map)['content']
+            as String;
+    expect(withNote, contains('User note: Callers broke'));
+    expect(withNote, isNot(contains('Reason it was undone: not stated')));
+  });
+
   test('approve moves a draft into the library; reject deletes one', () async {
     final baseten = await FakeProvider.start([FakeReply.chat(draftReply)]);
     addTearDown(baseten.close);
