@@ -116,6 +116,10 @@ The most important product qualities are:
   with `--apply` after the user agrees, never forces a conflict or recovery, then offers a lesson.
   To show the model the undone work, Doc exports the checkpoint's states with
   `dmc checkpoint export` into a temporary directory outside the workspace and diffs them there.
+- **`doc bisect` tests exports, never the working copy.** Each probe is a `dmc checkpoint export`
+  into a temporary folder outside the workspace, where `--setup` and `--test` run; the folders
+  are deleted unless `--keep`. The search (`bisectFirstBad`) is pure and deterministic. A model
+  only explains the result, and a restore is offered, never taken automatically.
 - **Lessons are Doc-only.** dmc never sees them. Matching is a fixed file-overlap rule; models only
   draft lessons (workhorse) and condense briefs (summary). Nothing enters the library without
   `doc lesson approve`, and a brief reaches an agent only after the user agrees (`--yes` is for
@@ -298,7 +302,8 @@ Use `docs/TESTER-READINESS-AUDIT.md` as the original audit and the Phase 2/3 han
   `dart run bin/doc.dart usage`, `dart run bin/doc.dart lesson draft|edit|approve|reject|show|brief`,
   `dart run bin/doc.dart lessons [path]`, `dart run bin/doc.dart start <muse-code|claude-code> "<task>"`,
   `dart run bin/doc.dart restore <checkpoint-id> [--yes] [--no-lesson]`,
-  `dart run bin/doc.dart lesson draft --last-restore`. Its gate: `dart pub get --enforce-lockfile`,
+  `dart run bin/doc.dart lesson draft --last-restore`,
+  `dart run bin/doc.dart bisect --test "<command>" [--setup …] [--link <dir>]… [--json]`. Its gate: `dart pub get --enforce-lockfile`,
   `dart analyze --fatal-infos`, `DMC_TEST_BIN=../build/dmc/bundle/bin/dmc dart test --concurrency=1`.
 - `dart run bin/dmc.dart init`
 - `dart run bin/dmc.dart watch`

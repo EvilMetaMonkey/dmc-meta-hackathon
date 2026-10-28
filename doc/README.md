@@ -32,6 +32,7 @@ dart compile exe bin/doc.dart -o ../build/doc
 | `doc models --available` | Lists each provider's model IDs (`GET {baseUrl}/models`). |
 | `doc summarize <checkpoint-id>` | Reads `checkpoint show` and `checkpoint diff` JSON from dmc, redacts, and asks the `summary` role for a 2–3 sentence plain-English summary: what changed, which files, anything risky. |
 | `doc usage` | Tokens and estimated cost per provider against the budgets (Modal: calls and tokens; billed by GPU time). |
+| `doc bisect --test "<command>" [--setup …] [--link <dir>]… [--from <cp>] [--to <cp>] [--all] [--timeout <s>] [--keep] [--no-explain] [--json]` | Time-travel bisect: find the agent turn where the tests started failing, by testing exported checkpoint states. See "Bisect". |
 | `doc restore <checkpoint-id> [--yes] [--no-lesson]` | Rollback without amnesia: preview dmc's restore, ask, apply it through dmc, then offer to draft a lesson from the undone work. See "Restore". |
 | `doc lesson draft <checkpoint-id> [--note "..."]`, `doc lesson draft --last-restore` | Drafts a lesson from a checkpoint, or from the most recent applied restore (workhorse role). See "Lesson library". |
 | `doc lesson edit\|approve\|reject <draft>`, `doc lesson show <id>` | Review a draft in `$VISUAL`/`$EDITOR`, add it to the library, delete it, or show an approved lesson. |
@@ -112,6 +113,95 @@ Defaults, overridable in `config.json` under `roles`:
 | `restore` | meta | `muse-spark-1.3` (fallback baseten) | Natural-language restore |
 | `planner`, `judge` | meta | `muse-wonder-1.0` | Parallel timelines |
 | `voice` | meta | `muse-voice-transcribe-1.0` | Push-to-talk (configured only; not wired up yet) |
+
+## Bisect: find the turn that broke the tests
+
+Spec: time-travel bisect runs your tests across agent-turn checkpoints to find the turn where
+things broke, without touching your working copy. The workhorse role (Muse Spark) explains the
+result.
+
+**How it searches.**
+- **Candidates:** closed checkpoints from `dmc checkpoint list --json`, oldest first. Only agent
+  turns are included unless `--all`, and `--from`/`--to` limit the range. Invalid or released
+  checkpoints are skipped and listed.
+- **Probe points:** the *before* state of the first candidate is the good end, and every
+  candidate's *after* state is a probe point.
+- **Ends first:** the good end must pass and the latest after state must fail. If not, Doc says
+  "The tests already fail before the first turn" or "The tests pass at the latest turn", with no
+  model call, and exits 1.
+- **Binary search:** for n turns, the two ends plus about log2(n) probes. The search is the pure
+  function `bisectFirstBad` in `lib/src/bisect.dart`. It assumes that once the tests fail, they
+  keep failing.
+
+**Each probe.**
+- `dmc checkpoint export <id> --state before|after --to <temp>` writes the state into a
+  temporary folder outside the workspace.
+- Then the optional `--setup` and the `--test` command run there (POSIX `/bin/sh -c`, Windows
+  `cmd /c`), with the export as cwd and a per-probe timeout (`--timeout`, default 300 s). Exit 0
+  is a pass. A timeout or failed setup counts as a failure.
+- Each probe prints a line as it runs (checkpoint, agent, label, PASS/FAIL, seconds).
+- The working copy and `.dmc/` are never touched, apart from dmc's own export reads.
+- Temporary folders are deleted on success, on failure and on Ctrl-C, unless `--keep`.
+
+**Dependencies.** Exports hold only protected files, so ignored dependencies are missing.
+- `--link <dir>` (repeatable) symlinks that working-copy folder into each export, for example
+  `--link node_modules`, `--link .venv` or `--link .dart_tool`. Doc warns that tests could write
+  into it.
+- `--setup "<command>"` runs in each export instead.
+- With neither, Doc suggests a setup for files it recognises: `pubspec.yaml` → `dart pub get`,
+  `package.json` → `npm ci` (or `npm install`), and `requirements.txt` / `pyproject.toml` → a pip
+  install into a `.venv` in the export.
+- It asks "Run this setup in each probe? [y/N]" and never runs a suggestion without a yes.
+
+**The result** is the first bad turn (id, label, agent, session, close time, changed files), the
+last good point, and the tail of the failing test output (40 lines). A label dmc cut to 100
+characters says "(truncated by dmc)"; dmc does not keep the full prompt.
+
+**The explanation.** Unless `--no-explain`, the redacted diff of the first bad turn (the
+abandoned-work export diff) and the redacted failing output go to the `workhorse` role for 3 or
+4 plain sentences. `--show-prompt` prints that request instead, and `--local` keeps it on this
+Mac. If the call fails, the result above still stands.
+
+**Next step, never automatic.** "Restore to before this turn? [y/N]" runs the `doc restore` flow
+on that checkpoint: dmc's preview, conflicts never forced, and the lesson offer. **`--yes`
+answers yes to the setup and restore questions; use it only for scripted demos.**
+
+**`--json`** prints one object on stdout, with progress on stderr and no questions:
+`{command, test, setup, suggestedSetup, links, candidates[], skipped[], probes[{index,
+checkpointId, state, passed, timedOut, setupFailed, seconds}], seconds, result{status: found |
+firstAlreadyFails | lastPasses, firstBad{…, changedFiles}, lastGood{checkpointId, state},
+failingOutputTail}, explanation}`. It's meant for parallel timelines.
+
+A real run on 2026-10-28 in a `/tmp` Python repo. Six real turns alternated between Claude Code
+(1, 3, 5) and Muse Code (`muse exec`; 2, 4, 6). Turn 3 made `round_money` round to one decimal:
+
+```text
+Bisecting 6 checkpoint(s) in /private/tmp/bisect-demo with: python3 -m unittest -q
+[probe 1] before cp_mvs8j0xv_… (claude-code): Add a function subtract_discount(amount, discount) to money.py that returns round_money(amount - di… (truncated by dmc)  PASS  0.1s
+[probe 2] after cp_mvs8l6k7_… (muse-code): In README.md, add a short Running tests section that says to run: python3 -m unittest. Only edit RE… (truncated by dmc)  FAIL  0.0s
+[probe 3] after cp_mvs8jrja_… (claude-code): In money.py, change round_money to round to 1 decimal place instead of 2, so displayed prices are s… (truncated by dmc)  FAIL  0.0s
+[probe 4] after cp_mvs8j0xv_… (claude-code): Add a function subtract_discount(…)  PASS  0.0s
+[probe 5] after cp_mvs8jhj2_… (muse-code): Add a section to README.md that lists the functions in money.py, one line each. Only edit README.md.  PASS  0.0s
+
+First bad turn: cp_mvs8jrja_7bfe15990a4f8dea035a3f849ab73555
+  claude-code, session db08a43f-…, closed 2026-10-28T09:54:59.977
+  Changed: money.py (modified)
+Last good point: after cp_mvs8jhj2_… (muse-code)
+Failing test output (tail): … AssertionError: 20.0 != 19.99 … FAILED (failures=2)
+5 probe(s) for 6 turn(s), 0.2s.
+
+Why (baseten meta-models/muse-spark-open-1026; 669 in / 498 out; 0 item(s) redacted):
+The turn changed money.py so round_money now rounds to 1 decimal place instead of 2. That change caused test_round_money_keeps_cents to get 20.0 instead of 19.99 and test_add_tax to get 21.6 instead of 21.64. Check whether round_money should be restored to 2 decimal places to satisfy the cent-precision expectations.
+
+Restore to before this turn? [y/N] y
+Restore would change 1 file(s):
+  - money.py: put back the version from before the turn
+Restore these files? [y/N] y
+Restored 1 file(s) through dmc (operation op_mvs8mgpl_2d3cc5d4a20520bbe3763aad).
+```
+
+Afterwards all 6 tests passed, and the later turns' changes were untouched. Cost: one Baseten
+call, $0.0029.
 
 ## Restore: rollback without amnesia
 
