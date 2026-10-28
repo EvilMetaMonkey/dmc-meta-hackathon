@@ -1,8 +1,15 @@
 import 'cli.dart';
 import 'dmc_client.dart';
 import 'lesson_commands.dart';
+import 'nl_restore_command.dart';
 
-/// `doc restore <checkpoint-id> [--yes] [--no-lesson]`
+/// A dmc checkpoint ID (`cp_<base36 time>_<hex>`): `doc restore` with one
+/// keeps the checkpoint flow; anything else is a natural-language request.
+final RegExp checkpointIdPattern = RegExp(r'^cp_[a-z0-9]+_[0-9a-f]+$');
+
+/// `doc restore <checkpoint-id> [--yes] [--no-lesson]`, or
+/// `doc restore "<request>"` for natural-language restore
+/// ([runNaturalRestore]).
 ///
 /// Rollback without amnesia: preview dmc's checkpoint restore in plain
 /// terms, apply it only after the user says yes, then offer to draft a
@@ -12,11 +19,16 @@ import 'lesson_commands.dart';
 /// yes to both questions and is meant only for scripted demos.
 Future<int> runRestoreCommand(DocContext context) async {
   final rest = context.args.rest;
-  if (rest.length != 2) {
-    context.log('Usage: doc restore <checkpoint-id> [--yes] [--no-lesson]');
+  if (rest.length < 2 || rest.skip(1).join(' ').trim().isEmpty) {
+    context.log(
+      'Usage: doc restore <checkpoint-id> [--yes] [--no-lesson], or doc restore "<request>" [--limit <n>] [--diff] [--yes] [--no-lesson] [--json]',
+    );
     return 2;
   }
-  return restoreCheckpoint(context, rest[1]);
+  if (rest.length == 2 && checkpointIdPattern.hasMatch(rest[1])) {
+    return restoreCheckpoint(context, rest[1]);
+  }
+  return runNaturalRestore(context, rest.skip(1).join(' ').trim());
 }
 
 /// The `doc restore` flow for checkpoint [id]: dmc's preview in plain

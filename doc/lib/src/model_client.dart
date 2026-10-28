@@ -96,6 +96,7 @@ Map<String, Object?> chatRequestBody({
   required List<ChatMessage> messages,
   required int maxTokens,
   String reasoningEffort = 'low',
+  Map<String, Object?>? responseFormat,
 }) {
   var sent = messages;
   final strength = provider.reasoningStrength;
@@ -115,6 +116,8 @@ Map<String, Object?> chatRequestBody({
       'reasoning_effort': reasoningEffort == 'none' ? 'low' : reasoningEffort,
     ...provider.sampling,
     provider.tokenLimitField: maxTokens,
+    if (responseFormat != null && provider.jsonSchema)
+      'response_format': responseFormat,
   };
 }
 
@@ -288,8 +291,12 @@ class ChatClient {
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $apiKey');
       }
       if (body != null) {
+        // A fixed length, not chunked: Modal's web proxy rejects a chunked
+        // request body with HTTP 500.
+        final bytes = utf8.encode(jsonEncode(body));
         request.headers.contentType = ContentType.json;
-        request.add(utf8.encode(jsonEncode(body)));
+        request.contentLength = bytes.length;
+        request.add(bytes);
       }
       final response = await request.close().timeout(provider.timeout);
       final text = await response

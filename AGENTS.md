@@ -107,11 +107,18 @@ The most important product qualities are:
 - **Doc providers:** `meta` (Muse Spark 1.3, Muse Wonder), `baseten` (Muse Spark Open), `fireworks`
   (Muse Spark Open backup), `modal` (Mike's private Muse Glimmer deployment in `deploy/modal/`;
   base URL from the config or `DOC_MODAL_BASE_URL`, never committed) and `local` (this Mac).
-  Roles: `summary` baseten → fireworks (Modal Glimmer is an opt-in, see `doc/README.md`),
-  `workhorse` baseten → fireworks, `restore` meta → baseten;
-  every fallback is logged and there is no second hop. `--local` means this Mac only and refuses
+  Roles: `summary` modal → baseten, `workhorse` baseten → fireworks, `restore` meta → baseten;
+  every fallback is logged and there is no second hop. A fallback whose key is missing or
+  rejected is reported as unavailable and skipped; the primary's error stands. `--local` means this Mac only and refuses
   Modal. Keys only from env vars (`MODEL_API_KEY`, `BASETEN_API_KEY`, `FIREWORKS_API_KEY`,
   `MODAL_GLIMMER_KEY`). See `doc/README.md`.
+- **Natural-language restore** (`doc restore "<request>"`): the model only names a mode
+  (`go_back_before`/`undo_turn`) and one of the offered checkpoints, as JSON;
+  `planNaturalRestore` (pure) validates it and refuses any other id, and low confidence or
+  alternatives always go to the user (never `--yes`). Every step is previewed with dmc and
+  combined by `combineStepPreviews` (pure); any conflict stops it. Steps apply newest first
+  through dmc after one confirmation, a failure offers `dmc checkpoint redo` for the applied
+  steps, and nothing is forced.
 - **`doc restore` only drives dmc.** It previews with `dmc checkpoint restore <id> --json`, applies
   with `--apply` after the user agrees, never forces a conflict or recovery, then offers a lesson.
   To show the model the undone work, Doc exports the checkpoint's states with
@@ -302,6 +309,7 @@ Use `docs/TESTER-READINESS-AUDIT.md` as the original audit and the Phase 2/3 han
   `dart run bin/doc.dart usage`, `dart run bin/doc.dart lesson draft|edit|approve|reject|show|brief`,
   `dart run bin/doc.dart lessons [path]`, `dart run bin/doc.dart start <muse-code|claude-code> "<task>"`,
   `dart run bin/doc.dart restore <checkpoint-id> [--yes] [--no-lesson]`,
+  `dart run bin/doc.dart restore "<request>" [--limit <n>] [--diff] [--yes] [--json]`,
   `dart run bin/doc.dart lesson draft --last-restore`,
   `dart run bin/doc.dart bisect --test "<command>" [--setup …] [--link <dir>]… [--json]`. Its gate: `dart pub get --enforce-lockfile`,
   `dart analyze --fatal-infos`, `DMC_TEST_BIN=../build/dmc/bundle/bin/dmc dart test --concurrency=1`.

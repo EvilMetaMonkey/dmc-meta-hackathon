@@ -139,7 +139,13 @@ class ModelRouter {
     String role,
     List<ChatMessage> messages, {
     int maxTokens = 400,
-  }) => _prepareFor(resolve(role), messages, maxTokens: maxTokens);
+    Map<String, Object?>? responseFormat,
+  }) => _prepareFor(
+    resolve(role),
+    messages,
+    maxTokens: maxTokens,
+    responseFormat: responseFormat,
+  );
 
   PreparedCall _prepareFor(
     ResolvedRole route,
@@ -147,6 +153,7 @@ class ModelRouter {
     required int maxTokens,
     ProviderConfig? provider,
     String? model,
+    Map<String, Object?>? responseFormat,
   }) {
     final redactor = this.redactor;
     final counts = <String, int>{};
@@ -168,16 +175,44 @@ class ModelRouter {
         messages: redacted,
         maxTokens: maxTokens,
         reasoningEffort: config.reasoningEffort,
+        responseFormat: responseFormat,
       ),
       counts,
     );
   }
 
-  /// Call [role] with [messages].
+  /// Providers found unavailable this run (key missing or rejected); they
+  /// are skipped as fallbacks.
+  final Map<String, String> unavailable = {};
+
+  /// Why [provider] cannot be used at all, or null: its key is not set, or
+  /// it was rejected earlier in this run.
+  String? unavailableReason(ProviderConfig provider) {
+    final known = unavailable[provider.id];
+    if (known != null) return known;
+    final keyEnv = provider.keyEnv;
+    if (provider.hosted &&
+        keyEnv != null &&
+        (environment[keyEnv] ?? '').isEmpty) {
+      return '$keyEnv is not set';
+    }
+    return null;
+  }
+
+  /// A missing or rejected key: the provider cannot serve anything until the
+  /// user fixes it.
+  static bool isUnavailableError(ModelCallException error) =>
+      error.kind == ModelCallFailure.missingKey ||
+      (error.kind == ModelCallFailure.http &&
+          (error.statusCode == 401 || error.statusCode == 403));
+
+  /// Call [role] with [messages]. [responseFormat] (a JSON schema) is sent
+  /// only to providers that accept it.
   Future<RoleCallResult> call(
     String role,
     List<ChatMessage> messages, {
     int maxTokens = 400,
+    Map<String, Object?>? responseFormat,
   }) async {
     final route = resolve(role);
     try {
@@ -187,8 +222,9 @@ class ModelRouter {
         route.model,
         messages,
         maxTokens,
+        responseFormat,
       );
-    } on ModelCallException catch (error) {
+    } on ModelCallException catch (error, stack) {
       final fallback = route.fallbackProvider;
       final fallbackEligible =
           fallback != null &&
@@ -203,16 +239,38 @@ class ModelRouter {
               // A private deployment that is not set up on this machine.
               error.kind == ModelCallFailure.notConfigured);
       if (!fallbackEligible) rethrow;
+      final reason = unavailableReason(fallback);
+      if (reason != null) {
+        log(
+          '${fallback.id} unavailable ($reason): role "$role" failed on ${route.provider.id} and its fallback was skipped.',
+        );
+        rethrow;
+      }
       log(
         'FALLBACK: role "$role" failed on ${route.provider.id} (${route.model}): ${error.message.replaceFirst(RegExp(r'\.$'), '')}. Using the configured fallback ${fallback.id} (${route.fallbackModel}).',
       );
-      final result = await _callOn(
-        route,
-        fallback,
-        route.fallbackModel!,
-        messages,
-        maxTokens,
-      );
+      final RoleCallResult result;
+      try {
+        result = await _callOn(
+          route,
+          fallback,
+          route.fallbackModel!,
+          messages,
+          maxTokens,
+          responseFormat,
+        );
+      } on ModelCallException catch (fallbackError) {
+        if (!isUnavailableError(fallbackError)) rethrow;
+        final why = fallbackError.kind == ModelCallFailure.missingKey
+            ? '${fallback.keyEnv} is not set'
+            : 'key rejected, HTTP ${fallbackError.statusCode}';
+        unavailable[fallback.id] = why;
+        log(
+          '${fallback.id} unavailable ($why): the fallback for role "$role" was skipped.',
+        );
+        // Report the primary provider's failure, not the fallback's.
+        Error.throwWithStackTrace(error, stack);
+      }
       return RoleCallResult(
         result.result,
         result.costUsd,
@@ -235,6 +293,7 @@ class ModelRouter {
     model,
     messages,
     maxTokens,
+    null,
   );
 
   Future<RoleCallResult> _callOn(
@@ -243,6 +302,7 @@ class ModelRouter {
     String model,
     List<ChatMessage> messages,
     int maxTokens,
+    Map<String, Object?>? responseFormat,
   ) async {
     if (localOnly && provider.hosted) {
       throw ModelCallException(
@@ -297,6 +357,7 @@ class ModelRouter {
       maxTokens: maxTokens,
       provider: provider,
       model: model,
+      responseFormat: responseFormat,
     );
     final result = await client.complete(
       provider: provider,

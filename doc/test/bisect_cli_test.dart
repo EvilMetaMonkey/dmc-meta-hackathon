@@ -384,6 +384,98 @@ void main() {
     expect(file('deps/lib.txt').readAsStringSync(), 'dependency\n');
   });
 
+  test(
+    'cleanup with --link removes only the link, on success and failure',
+    () async {
+      if (Platform.isWindows) return; // Uses sh's test.
+      file('.dmcignore').writeAsStringSync('deps/\n');
+      final linked = {
+        'deps/lib.txt': 'dependency\n',
+        'deps/nested/inner.txt': 'inner\n',
+      };
+      linked.forEach((name, text) {
+        file(name)
+          ..createSync(recursive: true)
+          ..writeAsStringSync(text);
+      });
+      Map<String, String> deps() => {
+        for (final entity in Directory(
+          p.join(workspace.path, 'deps'),
+        ).listSync(recursive: true, followLinks: false))
+          if (entity is File)
+            p.posix.joinAll(
+              p.split(p.relative(entity.path, from: workspace.path)),
+            ): entity
+                .readAsStringSync(),
+      };
+      void expectDepsIntact() {
+        expect(
+          FileSystemEntity.typeSync(
+            p.join(workspace.path, 'deps'),
+            followLinks: false,
+          ),
+          FileSystemEntityType.directory,
+        );
+        expect(deps(), linked);
+      }
+
+      await history(['good', 'bad']);
+      final temps = bisectTemps();
+      const needsDeps =
+          'test -f deps/nested/inner.txt && grep -q good state.txt';
+
+      // Success: the first bad turn is found.
+      expect(
+        await doc([
+          'bisect',
+          '--test',
+          needsDeps,
+          '--link',
+          'deps',
+          '--no-explain',
+        ]),
+        0,
+        reason: '$err',
+      );
+      expect('$out', contains('First bad turn'));
+      expectDepsIntact();
+      expect(bisectTemps(), temps);
+
+      // Failure: the tests already fail at the good end.
+      out.clear();
+      expect(
+        await doc([
+          'bisect',
+          '--test',
+          'test -f deps/lib.txt && false',
+          '--link',
+          'deps',
+          '--no-explain',
+        ]),
+        1,
+      );
+      expect('$out', contains('The tests already fail before the first turn'));
+      expectDepsIntact();
+      expect(bisectTemps(), temps);
+
+      // Failure: the test command crashes in every probe.
+      out.clear();
+      expect(
+        await doc([
+          'bisect',
+          '--test',
+          'test -f deps/lib.txt && kill -SEGV \$\$',
+          '--link',
+          'deps',
+          '--no-explain',
+        ]),
+        1,
+      );
+      expectDepsIntact();
+      expect(bisectTemps(), temps);
+    },
+  );
+
   test('a suggested setup is never run without a yes', () async {
     file('pubspec.yaml').writeAsStringSync('name: demo\n');
     await history(['good', 'bad']);

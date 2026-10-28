@@ -83,6 +83,11 @@ class ProviderConfig {
   /// Printed when a call has not answered after 10 s (a cold start).
   final String? wakeNotice;
 
+  /// Whether the provider takes `response_format` with a JSON schema
+  /// (verified for meta and baseten on 2026-10-28). Doc parses answers
+  /// strictly either way.
+  final bool jsonSchema;
+
   const ProviderConfig({
     required this.id,
     required this.baseUrl,
@@ -100,6 +105,7 @@ class ProviderConfig {
     this.sampling = const {},
     this.reasoningStrength,
     this.wakeNotice,
+    this.jsonSchema = false,
   });
 
   /// [baseUrl], or [baseUrlEnv]'s value when it is set.
@@ -129,6 +135,7 @@ class ProviderConfig {
     sampling: sampling,
     reasoningStrength: reasoningStrength,
     wakeNotice: wakeNotice,
+    jsonSchema: jsonSchema,
   );
 
   Map<String, Object?> toJson() => {
@@ -149,6 +156,7 @@ class ProviderConfig {
     'sampling': sampling,
     'reasoningStrength': reasoningStrength,
     'wakeNotice': wakeNotice,
+    'jsonSchema': jsonSchema,
   };
 
   static ProviderConfig fromJson(String id, Map<String, Object?> json) =>
@@ -182,6 +190,7 @@ class ProviderConfig {
         },
         reasoningStrength: json['reasoningStrength'] as String?,
         wakeNotice: json['wakeNotice'] as String?,
+        jsonSchema: json['jsonSchema'] as bool? ?? false,
       );
 }
 
@@ -236,9 +245,9 @@ const String modalGlimmerModel = 'muse-glimmer';
 const String fireworksSparkOpenModel =
     'accounts/fireworks/models/muse-spark-open';
 
-/// The opt-in `summary` role for a Muse Glimmer deployment on Modal
-/// (`deploy/modal/`), falling back to Baseten. doc/README.md gives the
-/// one-line config change that selects it.
+/// The default `summary` role: Muse Glimmer on Mike's Modal deployment
+/// (`deploy/modal/`), falling back to Baseten (logged). Without a deployment
+/// configured, every summary falls back.
 const RoleConfig modalSummaryRole = RoleConfig(
   role: 'summary',
   provider: 'modal',
@@ -282,6 +291,7 @@ class DocConfig {
         budgetUsd: 150,
         sendReasoningEffort: true,
         tokenLimitField: 'max_completion_tokens',
+        jsonSchema: true,
       ),
       'baseten': ProviderConfig(
         id: 'baseten',
@@ -292,6 +302,7 @@ class DocConfig {
         prices: {basetenSparkOpenModel: ModelPrice(1.25, 4.25)},
         budgetUsd: 100,
         sendReasoningEffort: true,
+        jsonSchema: true,
       ),
       'fireworks': ProviderConfig(
         id: 'fireworks',
@@ -336,15 +347,9 @@ class DocConfig {
       ),
     },
     roles: {
-      // Muse Glimmer on Modal is opt-in (see modalSummaryRole) while the
-      // deployment is on hold.
-      'summary': RoleConfig(
-        role: 'summary',
-        provider: 'baseten',
-        model: basetenSparkOpenModel,
-        fallbackProvider: 'fireworks',
-        fallbackModel: fireworksSparkOpenModel,
-      ),
+      // Muse Glimmer on Modal (deploy/modal/), with a logged Baseten
+      // fallback when it fails or no deployment is configured.
+      'summary': modalSummaryRole,
       'workhorse': RoleConfig(
         role: 'workhorse',
         provider: 'baseten',

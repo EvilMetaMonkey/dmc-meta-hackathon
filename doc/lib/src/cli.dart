@@ -44,6 +44,15 @@ Commands:
                                    apply it through dmc, then offer to draft a
                                    lesson from the undone work. --yes answers
                                    yes to both; use it only for scripted demos.
+  restore "<request>" [--limit <n>] [--diff] [--yes] [--no-lesson] [--json]
+                                   Natural-language restore ("take me back to
+                                   before it touched auth"): the restore role
+                                   picks a recent checkpoint (default 30) and
+                                   a mode, Doc validates it, asks you to pick
+                                   when unsure, previews every step with dmc
+                                   and asks once before applying. --yes
+                                   answers the apply and lesson questions,
+                                   never the pick.
   lesson draft <checkpoint-id> [--note "..."]
                                    Draft a lesson from a checkpoint (workhorse
                                    role). Files come from the checkpoint, not
@@ -98,6 +107,8 @@ ArgParser _parser() => ArgParser()
   ..addFlag('keep', negatable: false)
   ..addFlag('no-explain', negatable: false)
   ..addFlag('json', negatable: false)
+  ..addOption('limit')
+  ..addFlag('diff', negatable: false)
   ..addFlag('help', abbr: 'h', negatable: false);
 
 /// Run Doc. Output goes to [out], diagnostics (retries, fallbacks, errors)
@@ -251,16 +262,22 @@ Future<int> _models(DocContext context) async {
     '${_pad('Role', 11)}${_pad('Provider', 33)}${_pad('Model', 43)}Key',
   );
   final probes = <String, String>{};
+  // Providers that serve a role directly; the rest are only fallbacks.
+  final primaries = <String>{};
   for (final role in context.config.roles.keys) {
     final route = context.router.resolve(role);
     final roleConfig = context.config.roles[role]!;
+    final unavailable = route.fallbackProvider == null
+        ? null
+        : context.router.unavailableReason(route.fallbackProvider!);
     final fallback = route.fallbackProvider == null
         ? ''
-        : '  (fallback: ${route.fallbackProvider!.id} ${route.fallbackModel})';
+        : '  (fallback: ${route.fallbackProvider!.id} ${route.fallbackModel}${unavailable == null ? '' : '; ${route.fallbackProvider!.id} unavailable, skipped'})';
     out.writeln(
       '${_pad(role, 11)}${_pad(route.provider.label, 33)}${_pad(route.model, 43)}${context.keyStatus(route.provider)}${roleConfig.chat ? '' : '  (transcription; not wired up yet)'}$fallback',
     );
     if (roleConfig.chat) {
+      primaries.add(route.provider.id);
       probes.putIfAbsent(route.provider.id, () => route.model);
       if (route.fallbackProvider != null) {
         probes.putIfAbsent(
@@ -327,6 +344,24 @@ Future<int> _models(DocContext context) async {
           'reply: ${jsonEncode(_short(result.result.content))}',
         );
       } on ModelCallException catch (error) {
+        if (!primaries.contains(provider.id) &&
+            ModelRouter.isUnavailableError(error)) {
+          // Only a fallback: report it, skip it in fallbacks, don't fail.
+          final why = error.kind == ModelCallFailure.missingKey
+              ? '${provider.keyEnv} is not set'
+              : 'key rejected, HTTP ${error.statusCode}';
+          context.router.unavailable[provider.id] = why;
+          out.writeln(
+            '$label${provider.id} unavailable ($why). It is only a fallback, so Doc skips it in fallbacks.',
+          );
+          continue;
+        }
+        if (error.kind == ModelCallFailure.notConfigured) {
+          out.writeln(
+            '${label}not configured  ${error.message} Roles on it use their logged fallback.',
+          );
+          continue;
+        }
         failed = true;
         out.writeln(
           '${label}FAILED  ${explainFailure(error, provider, localOnly: context.router.localOnly)}',
@@ -430,7 +465,7 @@ Future<int> _summarize(DocContext context) async {
       ..writeln('')
       ..writeln(
         '(${result.provider} ${result.model}; ${result.promptTokens} in / ${result.completionTokens} out; '
-        '\$${call.costUsd.toStringAsFixed(6)}; ${result.latency.inMilliseconds} ms; '
+        '${context.config.providers[result.provider]?.billing == ProviderBilling.gpuTime ? 'billed by GPU time' : '\$${call.costUsd.toStringAsFixed(6)}'}; ${result.latency.inMilliseconds} ms; '
         '${call.redactionCount} item(s) redacted${call.fellBackFrom == null ? '' : '; fell back from ${call.fellBackFrom}'})',
       );
     return 0;

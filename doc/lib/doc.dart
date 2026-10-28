@@ -11,6 +11,8 @@ export 'src/lesson_commands.dart';
 export 'src/lessons.dart';
 export 'src/model_client.dart';
 export 'src/model_router.dart';
+export 'src/nl_restore.dart';
+export 'src/nl_restore_command.dart';
 export 'src/redaction.dart';
 export 'src/restore_command.dart';
 export 'src/summarize.dart';

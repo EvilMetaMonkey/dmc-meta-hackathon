@@ -82,10 +82,10 @@ web page.
 | Model or tool | Where | Job |
 |---|---|---|
 | Muse Code | local CLI | The demo agent, and the agent in each parallel timeline |
-| Muse Spark 1.3 (`muse-spark-1.3`) | Meta Model API | Natural-language restore |
-| Muse Spark Open (`meta-models/muse-spark-open-1026`) | Baseten, with Fireworks (`accounts/fireworks/models/muse-spark-open`) as the logged backup | The workhorse: per-checkpoint summaries, lesson briefs, lesson drafts and bisect explanations; also restore's fallback |
+| Muse Spark 1.3 (`muse-spark-1.3`) | Meta Model API (Baseten Muse Spark Open as the logged fallback) | Natural-language restore: picks a checkpoint and a mode as JSON (`response_format` schema); Doc validates it and dmc previews and applies |
+| Muse Spark Open (`meta-models/muse-spark-open-1026`) | Baseten, with Fireworks (`accounts/fireworks/models/muse-spark-open`) as the logged backup (skipped, and reported, when its key is missing or rejected) | The workhorse: lesson drafts and bisect explanations; also the fallback for summaries, briefs and restore |
 | Muse Wonder (`muse-wonder-1.0`) | Meta Model API | Plans the three timelines and judges the results |
-| Muse Glimmer 30B (`meta-models/Muse-Glimmer-30B`) | This Mac for `doc --local`; an optional private deployment on Modal (vLLM, one L40S; `deploy/modal/`), on hold until a card is added | Summaries and lesson briefs when opted in (`doc/README.md`). Lesson matching itself is a fixed rule, not a model |
+| Muse Glimmer 30B (`meta-models/Muse-Glimmer-30B`) | A private deployment on Modal (vLLM 0.28.0, one L40S, FP8; `deploy/modal/`), with a logged Baseten fallback; this Mac for `doc --local` | Per-checkpoint summaries and lesson briefs. Lesson matching itself is a fixed rule, not a model |
 | Muse Voice Transcribe (`muse-voice-transcribe-1.0`) | Meta Model API | "Hey Doc" push-to-talk |
 
 Model IDs were confirmed with `GET /models` on 2026-10-27. Role routing, prices and budgets are

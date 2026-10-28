@@ -235,8 +235,14 @@ Future<LastRestore?> findLastRestore(DmcClient dmc, String workspace) async {
 
 /// Draft a lesson from checkpoint [id]: dmc's facts plus the diff of the
 /// work it recorded (what a restore undoes), redacted, go to the workhorse
-/// role. `files` always comes from the checkpoint manifest.
-Future<int> draftLesson(DocContext context, String id, {String? note}) async {
+/// role. `files` always comes from the checkpoint manifest. [related]
+/// describes other work undone with it (natural-language restore).
+Future<int> draftLesson(
+  DocContext context,
+  String id, {
+  String? note,
+  String? related,
+}) async {
   final workspace = await _workspace(context);
   final show = await workspace.dmc.runJson([
     'checkpoint',
@@ -292,6 +298,7 @@ Future<int> draftLesson(DocContext context, String id, {String? note}) async {
         if (operations.isNotEmpty)
           'Completed operations on this checkpoint: ${operations.join(', ')} (a restore means the change was rolled back).',
         if (note != null && note.trim().isNotEmpty) 'User note: ${note.trim()}',
+        ?related,
         if (undone != null && undone.isNotEmpty) ...[
           '',
           'The work this checkpoint recorded (a restore undoes it), as a diff from before to after:',

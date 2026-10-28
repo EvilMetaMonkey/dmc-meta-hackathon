@@ -50,7 +50,7 @@ void main() {
         'modal': at('modal', modal ?? ''),
         'local': at('local', local),
       },
-      // The documented opt-in: summary on Modal, falling back to Baseten.
+      // Summary on Modal, falling back to Baseten (now also the default).
       roles: summaryOnModal
           ? {...defaults.roles, 'summary': modalSummaryRole}
           : defaults.roles,
@@ -504,7 +504,7 @@ void main() {
   });
 
   test(
-    'summary defaults to baseten and falls back to fireworks, logged',
+    'workhorse defaults to baseten and falls back to fireworks, logged',
     () async {
       final baseten = await FakeProvider.start([
         const FakeReply(503, {'error': 'busy'}),
@@ -521,17 +521,137 @@ void main() {
           local: await closedBaseUrl(),
           fireworks: fireworks.baseUrl,
         ),
-      ).call('summary', prompt);
+      ).call('workhorse', prompt);
       expect(result.result.content, 'fireworks summary');
       expect(result.fellBackFrom, 'baseten');
       expect(baseten.requests.first.body!['model'], basetenSparkOpenModel);
       expect(
         logs.where(
           (line) =>
-              line.startsWith('FALLBACK: role "summary" failed on baseten'),
+              line.startsWith('FALLBACK: role "workhorse" failed on baseten'),
         ),
         hasLength(1),
       );
     },
   );
+
+  test('summary defaults to Modal Glimmer, falling back to baseten', () async {
+    final baseten = await FakeProvider.start([FakeReply.chat('spark open')]);
+    addTearDown(baseten.close);
+    // No Modal deployment configured on this machine.
+    final result = await router(
+      config(
+        meta: await closedBaseUrl(),
+        baseten: baseten.baseUrl,
+        local: await closedBaseUrl(),
+      ),
+    ).call('summary', prompt);
+    expect(result.result.content, 'spark open');
+    expect(result.fellBackFrom, 'modal');
+    expect(
+      logs.where(
+        (line) => line.startsWith('FALLBACK: role "summary" failed on modal'),
+      ),
+      hasLength(1),
+    );
+  });
+
+  group('fireworks unavailable', () {
+    ModelRouter withoutFireworksKey(DocConfig config) => ModelRouter(
+      config: config,
+      environment: {...env}..remove('FIREWORKS_API_KEY'),
+      usage: usage,
+      client: ChatClient(maxRetries: 0, sleep: (_) async {}),
+      log: logs.add,
+    );
+
+    test('a missing key: the fallback is skipped and the primary error is '
+        'reported', () async {
+      final baseten = await FakeProvider.start([
+        const FakeReply(503, {'error': 'busy'}),
+      ]);
+      final fireworks = await FakeProvider.start([FakeReply.chat('never')]);
+      addTearDown(baseten.close);
+      addTearDown(fireworks.close);
+      final call = withoutFireworksKey(
+        config(
+          meta: await closedBaseUrl(),
+          baseten: baseten.baseUrl,
+          local: await closedBaseUrl(),
+          fireworks: fireworks.baseUrl,
+        ),
+      ).call('workhorse', prompt);
+      await expectLater(
+        call,
+        throwsA(
+          isA<ModelCallException>()
+              .having((e) => e.provider, 'provider', 'baseten')
+              .having((e) => e.statusCode, 'status', 503),
+        ),
+      );
+      expect(fireworks.requests, isEmpty);
+      expect(
+        logs,
+        contains(
+          'fireworks unavailable (FIREWORKS_API_KEY is not set): role "workhorse" failed on baseten and its fallback was skipped.',
+        ),
+      );
+      expect(logs.where((line) => line.startsWith('FALLBACK:')), isEmpty);
+    });
+
+    test(
+      'a rejected key: reported, then skipped for the rest of the run',
+      () async {
+        final baseten = await FakeProvider.start([
+          const FakeReply(503, {'error': 'busy'}),
+        ]);
+        final fireworks = await FakeProvider.start([
+          const FakeReply(401, {'error': 'invalid api key'}),
+        ]);
+        addTearDown(baseten.close);
+        addTearDown(fireworks.close);
+        final routed = router(
+          config(
+            meta: await closedBaseUrl(),
+            baseten: baseten.baseUrl,
+            local: await closedBaseUrl(),
+            fireworks: fireworks.baseUrl,
+          ),
+        );
+        for (var i = 0; i < 2; i++) {
+          await expectLater(
+            routed.call('workhorse', prompt),
+            throwsA(
+              isA<ModelCallException>().having(
+                (e) => e.provider,
+                'provider',
+                'baseten',
+              ),
+            ),
+          );
+        }
+        expect(fireworks.requests, hasLength(1));
+        expect(
+          logs,
+          contains(
+            'fireworks unavailable (key rejected, HTTP 401): the fallback for role "workhorse" was skipped.',
+          ),
+        );
+      },
+    );
+
+    test('a working primary never touches fireworks', () async {
+      final baseten = await FakeProvider.start([FakeReply.chat('fine')]);
+      addTearDown(baseten.close);
+      final result = await withoutFireworksKey(
+        config(
+          meta: await closedBaseUrl(),
+          baseten: baseten.baseUrl,
+          local: await closedBaseUrl(),
+        ),
+      ).call('workhorse', prompt);
+      expect(result.result.content, 'fine');
+      expect(logs, isEmpty);
+    });
+  });
 }

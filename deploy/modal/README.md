@@ -2,12 +2,26 @@
 
 A private, OpenAI-compatible endpoint serving Muse Glimmer 30B for Doc's `summary` role.
 
-**Status (2026-10-27): not yet deployed.** The Modal CLI is set up on Mike's Mac (logged in to
-your Modal workspace), the `muse-glimmer-api-key` secret and the two Volumes exist, and
-`MODAL_GLIMMER_KEY` is in `~/.zshrc`. Modal refused to run the app: "Please add a payment
-method to use L40S GPU functions." Modal requires a card on file for any GPU, even when credit
-covers the cost. Until a card is added, Doc's `summary` role falls back to Baseten (Muse Spark
-Open), and every fallback is logged.
+**Status (2026-10-28): deployed** as written, on one L40S with FP8 (the A100-80GB fallback was
+not needed). Mike added billing ($100 credit); keep a **$100 spending limit** on the workspace.
+Doc's `summary` role uses it by default, with a logged Baseten fallback. The endpoint URL is
+only in `DOC_MODAL_BASE_URL` in Mike's `~/.zshrc`, never in the repository.
+
+| Measured 2026-10-28 | Result |
+|---|---|
+| GPU | 1× L40S (48 GB), FP8 weights quantized at load |
+| Memory | weights 28.6 GiB; 12.0 GiB left for the FP8 KV cache (1,236,447 tokens, 37× a 32k request) |
+| First start ever | weights loaded in 29 s from the Volume; engine init 86 s (73 s of it `torch.compile`) |
+| Cold `doc models --check` (from zero containers) | 94.1 s |
+| Warm `doc models --check` | 2.4 s and 2.1 s |
+| Warm `doc summarize` (245 in / 233 out) | 11.1 s |
+| Scale to zero | 0 containers about 6 minutes after the last request (seen twice) |
+| Spend | $0.93 metered by the end of the session (download, deploy and these runs; the summary first showed $0.98), $0.00 billed after credit |
+
+Weight download (`::download`) took 5 minutes. The first request failed until Doc stopped
+sending chunked request bodies: Modal's web proxy answered a chunked body with HTTP 500
+("chunked can not be set if Transfer-Encoding: chunked header is set"). Doc now sends a
+Content-Length.
 
 ## What it serves, and why
 
@@ -22,9 +36,9 @@ Open), and every fallback is logged.
 | Sampling | `--generation-config auto` (temperature 1.0, top_p 0.95, top_k 64); Doc sends the same | Model card "Best practices" |
 | Reasoning | Doc adds `Reasoning strength: low.` to the system prompt; the reasoning parser keeps the reasoning out of `content`, and Doc strips any that slips through | Model card: levels low / medium / high / xhigh, set in the system prompt |
 
-**Untested risk:** vLLM's on-the-fly FP8 may need the full BF16 weights in GPU memory before it
-quantizes them, which would not fit in 48 GB. If the first start fails with out-of-memory,
-deploy on one A100-80GB and serve BF16 unquantized ($2.50/hr):
+vLLM's on-the-fly FP8 fits on the 48 GB L40S (verified 2026-10-28: it quantizes as it loads, and
+the model took 28.6 GiB). If a later vLLM or model revision runs out of memory, deploy on one
+A100-80GB and serve BF16 unquantized ($2.50/hr):
 
 ```sh
 GLIMMER_GPU=A100-80GB GLIMMER_QUANTIZATION=none modal deploy deploy/modal/glimmer.py
@@ -63,4 +77,6 @@ Give Doc the URL with `/v1` appended, either in `~/.config/dmc-doc/config.json`
 secret, and serves `/v1/chat/completions` and `/v1/models` only to callers who send it.
 
 Check it with `doc models --check` (the first call after idle wakes the GPU; Doc prints "Waking
-Muse Glimmer on Modal (can take a couple of minutes)…" after 10 s and waits up to 600 s).
+Muse Glimmer on Modal (can take a couple of minutes)…" after 10 s and waits up to 600 s). Warm it
+this way a few minutes before recording a demo. `modal app list` shows the app's running tasks
+(0 when it has scaled to zero), and `modal billing summary` the month's metered cost.

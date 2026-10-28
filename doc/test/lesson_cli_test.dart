@@ -77,7 +77,7 @@ void main() {
 
   tearDown(() => home.deleteSync(recursive: true));
 
-  /// The documented opt-in that puts the summary role on Modal.
+  /// The summary role on Modal (now also the default), stated explicitly.
   const summaryOnModal = {
     'summary': {
       'provider': 'modal',

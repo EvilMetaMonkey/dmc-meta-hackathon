@@ -280,9 +280,13 @@ void main() {
 
   test('defaults route roles as specified', () {
     final config = DocConfig.defaults();
-    expect(config.roles['summary']!.provider, 'baseten');
-    expect(config.roles['summary']!.model, basetenSparkOpenModel);
-    expect(config.roles['summary']!.fallbackProvider, 'fireworks');
+    expect(config.roles['summary']!.provider, 'modal');
+    expect(config.roles['summary']!.model, modalGlimmerModel);
+    expect(config.roles['summary']!.fallbackProvider, 'baseten');
+    expect(config.roles['summary']!.fallbackModel, basetenSparkOpenModel);
+    expect(config.providers['meta']!.jsonSchema, isTrue);
+    expect(config.providers['baseten']!.jsonSchema, isTrue);
+    expect(config.providers['fireworks']!.jsonSchema, isFalse);
     expect(modalSummaryRole.provider, 'modal');
     expect(modalSummaryRole.fallbackProvider, 'baseten');
     expect(config.roles['workhorse']!.fallbackProvider, 'fireworks');

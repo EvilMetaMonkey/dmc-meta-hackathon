@@ -257,22 +257,21 @@ void main() {
   });
 
   test(
-    'summary uses baseten by default, with a logged fireworks fallback',
+    'summary uses Modal Glimmer by default, with a logged baseten fallback',
     () async {
-      final baseten = await FakeProvider.start([
+      final modal = await FakeProvider.start([
         const FakeReply(503, {'error': 'busy'}),
       ]);
-      final fireworks = await FakeProvider.start([
+      final baseten = await FakeProvider.start([
         FakeReply.chat('Fallback summary.', prompt: 200, completion: 50),
       ]);
+      addTearDown(modal.close);
       addTearDown(baseten.close);
-      addTearDown(fireworks.close);
-      writeConfig(baseten: baseten.baseUrl);
       File(p.join(configDir.path, 'config.json')).writeAsStringSync(
         jsonEncode({
           'providers': {
+            'modal': {'baseUrl': modal.baseUrl},
             'baseten': {'baseUrl': baseten.baseUrl},
-            'fireworks': {'baseUrl': fireworks.baseUrl},
           },
         }),
       );
@@ -287,13 +286,14 @@ void main() {
         ],
         env: {
           'BASETEN_API_KEY': 'baseten-key-for-tests-01',
-          'FIREWORKS_API_KEY': 'fireworks-key-for-tests-02',
+          'MODAL_GLIMMER_KEY': 'modal-key-for-tests-02',
         },
       );
       expect(code, 0, reason: '$err');
+      expect(modal.requests, isNotEmpty);
       expect('$out', contains('Fallback summary.'));
-      expect('$out', contains('fell back from baseten'));
-      expect('$err', contains('FALLBACK: role "summary" failed on baseten'));
+      expect('$out', contains('fell back from modal'));
+      expect('$err', contains('FALLBACK: role "summary" failed on modal'));
       expect('$err', isNot(contains('..')));
     },
   );
@@ -337,10 +337,20 @@ void main() {
         ),
       );
       expect(text, contains('baseten: BASETEN_API_KEY is not set.'));
-      expect(text, contains('fireworks: FIREWORKS_API_KEY is not set.'));
-      // Modal is opt-in: listed as a provider, but no default role probes it.
-      expect(text, isNot(contains('modal: no base URL is configured')));
-      expect(text, contains('summary    baseten'));
+      // Only a fallback: unavailable, not a failure.
+      expect(
+        text,
+        contains(
+          'fireworks unavailable (FIREWORKS_API_KEY is not set). It is only a fallback, so Doc skips it in fallbacks.',
+        ),
+      );
+      expect(text, contains('fireworks unavailable, skipped)'));
+      // summary is on Modal, which is not configured here: it falls back.
+      expect(
+        text,
+        contains('not configured  modal: no base URL is configured'),
+      );
+      expect(text, contains('summary    modal'));
       expect(meta.requests.single.body!['reasoning_effort'], 'low');
       expect(code, 1);
 
@@ -357,6 +367,55 @@ void main() {
         contains('billed by GPU time on Modal; check the Modal dashboard'),
       );
       expect('$out', contains('fireworks'));
+    },
+  );
+
+  test(
+    '--check passes when only fireworks, a fallback, is unavailable',
+    () async {
+      final meta = await FakeProvider.start([FakeReply.chat('ok')]);
+      final baseten = await FakeProvider.start([FakeReply.chat('ok')]);
+      final fireworks = await FakeProvider.start([
+        const FakeReply(401, {'error': 'invalid api key'}),
+      ]);
+      addTearDown(meta.close);
+      addTearDown(baseten.close);
+      addTearDown(fireworks.close);
+      File(p.join(configDir.path, 'config.json')).writeAsStringSync(
+        jsonEncode({
+          'providers': {
+            'meta': {'baseUrl': meta.baseUrl},
+            'baseten': {'baseUrl': baseten.baseUrl},
+            'fireworks': {'baseUrl': fireworks.baseUrl},
+          },
+        }),
+      );
+      const keys = {
+        'MODEL_API_KEY': 'meta-key-for-tests-0001',
+        'BASETEN_API_KEY': 'baseten-key-for-tests-01',
+      };
+      // Missing key.
+      expect(await doc(['models', '--check'], env: keys), 0, reason: '$out');
+      expect(
+        '$out',
+        contains('fireworks unavailable (FIREWORKS_API_KEY is not set)'),
+      );
+      expect(fireworks.requests, isEmpty);
+      // Rejected key.
+      out.clear();
+      expect(
+        await doc(
+          ['models', '--check'],
+          env: {...keys, 'FIREWORKS_API_KEY': 'fireworks-key-rejected-03'},
+        ),
+        0,
+        reason: '$out',
+      );
+      expect(
+        '$out',
+        contains('fireworks unavailable (key rejected, HTTP 401)'),
+      );
+      expect('$out', isNot(contains('FAILED')));
     },
   );
 }

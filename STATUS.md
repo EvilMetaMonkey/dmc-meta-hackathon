@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-28 by Claude (bisect session)
+Last updated: 2026-10-28 by Claude (Glimmer and natural-language restore session)
 
 ## Done
 
@@ -297,6 +297,65 @@ Last updated: 2026-10-28 by Claude (bisect session)
     - Afterwards both hooks were uninstalled (Muse `settings.json` back to the same SHA-256) and
       the repo was removed.
 
+- **Bisect `--link` cleanup test** (branch `hackathon/glimmer-nl-restore`): cleanup removes only
+  the symlink; the linked working-copy folder and its nested files survive a successful bisect,
+  one whose tests already fail, and one whose test command crashes. Verified by a new test in
+  `doc/test/bisect_cli_test.dart`.
+- **Muse Glimmer deployed on Modal** as written: Meta's official `meta-models/Muse-Glimmer-30B`
+  (pinned revision), vLLM 0.28.0 with the `muse_glimmer` parsers, one L40S with FP8 (it fits:
+  28.6 GiB of weights, 12 GiB of KV cache), at most 1 container, scale to zero after 5 idle
+  minutes. The A100 fallback was not needed.
+  - The URL is only in `DOC_MODAL_BASE_URL` in Mike's `~/.zshrc` (backup
+    `~/.zshrc.backup-20261028-151453`, mode 600), never printed or committed.
+  - Measured: cold `doc models --check` 94.1 s; warm 2.4 s and 2.1 s; a warm `doc summarize` on
+    a real Muse Code checkpoint 11.1 s (245 in / 233 out); 0 containers about 6 minutes after
+    the last request, seen twice (`modal app list`, `modal container list`). Spend: $0.93
+    metered, $0.00 billed after credit.
+  - Found and fixed: Modal's web proxy answered Doc's chunked request bodies with HTTP 500, so
+    Doc now sends a Content-Length.
+  - `summary` is back on modal Glimmer by default, with a logged Baseten fallback (also when no
+    deployment is configured).
+- **Fireworks unavailable handling.** A fallback whose key is missing or rejected (401/403) is
+  logged as "`<provider>` unavailable (…)", skipped for the rest of the run, and the primary's
+  error is reported. `doc models --check` reports "fireworks unavailable" without failing when
+  Fireworks is only a fallback. Verified by 3 router tests and 1 CLI test (missing and rejected
+  key). Mike's current Fireworks key is still accepted (checked with `GET /models`).
+- **Meta accepts `response_format`** with a strict JSON schema (2026-10-28, `muse-spark-1.3`:
+  HTTP 200, the answer in the schema's shape). Baseten accepts it too and enforces it (it kept
+  to the schema when the prompt asked for plain text). Fireworks, Modal and local are not sent
+  it.
+- **Natural-language restore** (`doc restore "<request>"`; Doc only, dmc unchanged). Candidates,
+  the model's JSON answer, the pure validation (`planNaturalRestore`), the choice screen
+  (never skipped by `--yes`), per-step dmc previews combined by `combineStepPreviews` (pure)
+  with line counts from exports, one confirmation, newest-first apply through dmc, the redo
+  offer after a failure, and the lesson offer. Verified by 15 pure tests
+  (`doc/test/nl_restore_test.dart`) and 12 CLI tests with a compiled dmc and fake providers
+  (`doc/test/nl_restore_cli_test.dart`): an id not offered is refused after one retry; a
+  malformed answer is retried; low confidence shows the choices and nothing is applied without
+  a pick; go_back_before applies newest first; undo_turn applies one step; a preview conflict
+  blocks; a failure mid-apply stops and the offered redo puts it back; "no" leaves the working
+  copy byte-identical; truncated labels are marked; the request and labels are redacted;
+  `--local` refuses hosted; the JSON shape; a checkpoint ID keeps the old flow.
+  - Real check on the Mac, 2026-10-28, in `/tmp/nl-demo` with both agents' hooks: six real
+    turns (Claude Code `slugify` in `utils.py`; Muse Code `hmac.compare_digest` in `auth.py`;
+    Claude Code README; Muse Code `health()` in `app.py`; Claude Code `test_utils.py`, once with
+    no change and once created). `doc restore "take me back to before it touched auth"` picked
+    the Muse auth turn at confidence 0.95 and planned 5 steps; the applied result was
+    byte-identical to `dmc checkpoint export --state before` of that turn, with turn 1 kept.
+    `doc restore "undo what claude did"` came back at 0.55 and showed the four Claude Code
+    turns; Enter cancelled it. The undone work was put back with `dmc checkpoint redo --apply`.
+    Hooks were uninstalled (Muse `settings.json` back to the same SHA-256), the demo lesson
+    draft was rejected and the repo removed. Cost: meta $0.022 (incl. two manual probes),
+    baseten $0.0056, fireworks $0.0020, Modal GPU time as above.
+  - Gates on the Mac: dmc analyzer clean, `dart test --concurrency=1` 223 passed, Haven contract
+    tests 3 passed; Doc `dart analyze --fatal-infos` clean, 121 tests passed.
+  - PR #9 (`hackathon/glimmer-nl-restore`): CI passed on ubuntu, macOS, macOS Intel and Windows in
+    both the push and pull_request runs for `303d296`. dmc ran 223 tests (Windows 221 plus 2
+    skipped), the Haven contract 3 and Doc 121 on every platform.
+  - The agents ran without blanket approval: Claude Code with `--allowedTools Read
+    "Edit(<file>)"` and Muse Code with its defaults plus `--disable-shell --disable-web-tools`
+    (a blanket-approval launch was refused by this session's permission check).
+
 ## In progress
 
 - Nothing yet.
@@ -312,15 +371,15 @@ Last updated: 2026-10-28 by Claude (bisect session)
   consulted ignore rules, and not by `checkpoint recover --resume|--rollback`, which finishes an
   already-journaled operation.
 - Git mode on Windows is verified only by CI (`windows-latest`), not on a real Windows machine.
-- **Muse Glimmer on Modal is not deployed.** Modal refused the app: "Please add a payment method
-  to use L40S GPU functions" (a card is required for any GPU, even with credit). Mike chose not
-  to add one now, so Modal is on hold: the `summary` role (summaries and lesson briefs) now
-  defaults to Baseten Muse Spark Open with a logged Fireworks fallback, and Modal is an opt-in
-  (`doc/README.md`). Also untested: whether vLLM's on-the-fly FP8 fits
-  the 60 GB BF16 checkpoint on a 48 GB L40S. If it does not, use one A100-80GB with BF16
-  (`deploy/modal/README.md`). No cold-start or warm latency has been measured yet. Glimmer is
-  also not on this Mac (24 GiB, Apple M5; Ollama, LM Studio and llama.cpp are installed, but no
-  Glimmer model).
+- Muse Glimmer on Modal is deployed and measured (see Done), which fixes the old "not deployed"
+  item. Still true: Glimmer is not on this Mac (24 GiB, Apple M5; no Glimmer model in Ollama,
+  LM Studio or llama.cpp), so `doc --local` has no Glimmer. A cold Modal start takes about 90 s,
+  and Modal's spending limit (keep it at $100) is the only cost guard, since Doc cannot see
+  GPU time.
+- Natural-language restore: a request for a checkpoint older than the 30 most recent needs
+  `--limit`. `go_back_before` includes manual (non-agent) checkpoints in its range, by design.
+  The model's choice is only as good as the labels: dmc keeps the first 100 characters of a
+  prompt.
 - The Modal workspace name is gone from the docs but still in the history of earlier commits
   (`deploy/modal/README.md` and `STATUS.md` before `f8c2d8f`). Rewriting published history needs
   Mike's decision.
@@ -349,21 +408,27 @@ Last updated: 2026-10-28 by Claude (bisect session)
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. Natural-language restore ("take me back to before it touched auth"), always with dmc's
-   preview and a confirmation step, through the `doc restore` flow.
-2. Then, per the spec's schedule: push-to-talk voice
-   (Nov 1), parallel timelines (Nov 1–2), demo and README (Nov 3), submit (Nov 4).
+1. "Hey Doc" push-to-talk voice (no wake word), with Muse Voice Transcribe
+   (`muse-voice-transcribe-1.0`, the `voice` role).
+2. Then, per the spec's schedule: parallel timelines (Nov 1–2), demo and README (Nov 3), submit
+   (Nov 4).
 
-### Before the demo (optional)
+### Before the demo
 
-- Deploy Muse Glimmer on Modal, if Mike adds a payment method: run
-  `modal run deploy/modal/glimmer.py::download` and `modal deploy deploy/modal/glimmer.py`, apply
-  the one-line opt-in in `doc/README.md`, run `doc models --check` twice (cold, then warm), record
-  the latencies in `doc/README.md`, and confirm it scales to zero.
+- Warm Glimmer with `doc models --check` a few minutes before recording (a cold start takes
+  about 90 s).
+- Keep the $100 spending limit on the Modal workspace.
 
 ## Session log
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
+
+- 2026-10-28 · Claude · Glimmer and natural-language restore (branch
+  `hackathon/glimmer-nl-restore`): the bisect `--link` cleanup test; Muse Glimmer deployed on
+  Modal (L40S, FP8; cold 94 s, warm 2.2 s, scale to zero confirmed, $0.93 metered) with the
+  Content-Length fix, and `summary` back on it; fireworks-unavailable handling;
+  `doc restore "<request>"` with pure planning and combining, verified with tests and a real
+  six-turn Claude Code + Muse Code run. Left open: rotating the Fireworks key.
 
 - 2026-10-28 · Claude · Bisect (branch `hackathon/bisect`): `doc bisect` with a pure search,
   export-based probes, setup/link handling, an explanation and the restore offer. Verified with
