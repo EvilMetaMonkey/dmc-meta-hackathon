@@ -2,8 +2,8 @@
 
 A private, OpenAI-compatible endpoint serving Muse Glimmer 30B for Doc's `summary` role.
 
-**Status (2026-10-27): not yet deployed.** The Modal CLI is set up on Mike's Mac (workspace
-`mikeishermes`), the `muse-glimmer-api-key` secret and the two Volumes exist, and
+**Status (2026-10-27): not yet deployed.** The Modal CLI is set up on Mike's Mac (logged in to
+your Modal workspace), the `muse-glimmer-api-key` secret and the two Volumes exist, and
 `MODAL_GLIMMER_KEY` is in `~/.zshrc`. Modal refused to run the app: "Please add a payment
 method to use L40S GPU functions." Modal requires a card on file for any GPU, even when credit
 covers the cost. Until a card is added, Doc's `summary` role falls back to Baseten (Muse Spark

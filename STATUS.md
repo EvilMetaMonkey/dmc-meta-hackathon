@@ -193,7 +193,7 @@ Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library sessio
     FP8 at load, 32k context, text only.
   - Operation: weights cached in a Modal Volume; scales to zero after 5 idle minutes, with at
     most 1 container; bearer key from a Modal Secret.
-  - Set up on the Mac: the Modal CLI 1.6.3 (workspace `mikeishermes`), the
+  - Set up on the Mac: the Modal CLI 1.6.3 (logged in to your Modal workspace), the
     `muse-glimmer-api-key` secret, the two Volumes (empty), and `MODAL_GLIMMER_KEY` in
     `~/.zshrc` (never printed).
 - **Lesson library, part 1** (Doc only). Markdown lessons with YAML front matter live in Doc's
