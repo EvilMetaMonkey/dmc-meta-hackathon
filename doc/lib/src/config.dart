@@ -236,6 +236,17 @@ const String modalGlimmerModel = 'muse-glimmer';
 const String fireworksSparkOpenModel =
     'accounts/fireworks/models/muse-spark-open';
 
+/// The opt-in `summary` role for a Muse Glimmer deployment on Modal
+/// (`deploy/modal/`), falling back to Baseten. doc/README.md gives the
+/// one-line config change that selects it.
+const RoleConfig modalSummaryRole = RoleConfig(
+  role: 'summary',
+  provider: 'modal',
+  model: modalGlimmerModel,
+  fallbackProvider: 'baseten',
+  fallbackModel: basetenSparkOpenModel,
+);
+
 /// Doc's configuration: providers and role routing.
 class DocConfig {
   final Map<String, ProviderConfig> providers;
@@ -325,12 +336,14 @@ class DocConfig {
       ),
     },
     roles: {
+      // Muse Glimmer on Modal is opt-in (see modalSummaryRole) while the
+      // deployment is on hold.
       'summary': RoleConfig(
         role: 'summary',
-        provider: 'modal',
-        model: modalGlimmerModel,
-        fallbackProvider: 'baseten',
-        fallbackModel: basetenSparkOpenModel,
+        provider: 'baseten',
+        model: basetenSparkOpenModel,
+        fallbackProvider: 'fireworks',
+        fallbackModel: fireworksSparkOpenModel,
       ),
       'workhorse': RoleConfig(
         role: 'workhorse',

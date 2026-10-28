@@ -30,6 +30,7 @@ void main() {
     required String local,
     String fireworks = 'http://127.0.0.1:9/v1',
     String? modal,
+    bool summaryOnModal = false,
     double metaBudget = 150,
   }) {
     final defaults = DocConfig.defaults();
@@ -49,7 +50,10 @@ void main() {
         'modal': at('modal', modal ?? ''),
         'local': at('local', local),
       },
-      roles: defaults.roles,
+      // The documented opt-in: summary on Modal, falling back to Baseten.
+      roles: summaryOnModal
+          ? {...defaults.roles, 'summary': modalSummaryRole}
+          : defaults.roles,
     );
   }
 
@@ -330,6 +334,7 @@ void main() {
           baseten: await closedBaseUrl(),
           local: await closedBaseUrl(),
           modal: modal.baseUrl,
+          summaryOnModal: true,
         ),
       ).call('summary', prompt);
       expect(result.result.content, 'glimmer summary');
@@ -366,6 +371,7 @@ void main() {
           baseten: baseten.baseUrl,
           local: await closedBaseUrl(),
           modal: modal.baseUrl,
+          summaryOnModal: true,
         ),
       ).call('summary', prompt);
       expect(failing.fellBackFrom, 'modal');
@@ -384,6 +390,7 @@ void main() {
           meta: await closedBaseUrl(),
           baseten: baseten.baseUrl,
           local: await closedBaseUrl(),
+          summaryOnModal: true,
         ),
       ).call('summary', prompt);
       expect(unconfigured.fellBackFrom, 'modal');
@@ -399,6 +406,7 @@ void main() {
         meta: await closedBaseUrl(),
         baseten: await closedBaseUrl(),
         local: await closedBaseUrl(),
+        summaryOnModal: true,
       ),
       environment: {...env, 'DOC_MODAL_BASE_URL': modal.baseUrl},
       usage: usage,
@@ -494,4 +502,36 @@ void main() {
     );
     expect(modal.requests, isEmpty);
   });
+
+  test(
+    'summary defaults to baseten and falls back to fireworks, logged',
+    () async {
+      final baseten = await FakeProvider.start([
+        const FakeReply(503, {'error': 'busy'}),
+      ]);
+      final fireworks = await FakeProvider.start([
+        FakeReply.chat('fireworks summary'),
+      ]);
+      addTearDown(baseten.close);
+      addTearDown(fireworks.close);
+      final result = await router(
+        config(
+          meta: await closedBaseUrl(),
+          baseten: baseten.baseUrl,
+          local: await closedBaseUrl(),
+          fireworks: fireworks.baseUrl,
+        ),
+      ).call('summary', prompt);
+      expect(result.result.content, 'fireworks summary');
+      expect(result.fellBackFrom, 'baseten');
+      expect(baseten.requests.first.body!['model'], basetenSparkOpenModel);
+      expect(
+        logs.where(
+          (line) =>
+              line.startsWith('FALLBACK: role "summary" failed on baseten'),
+        ),
+        hasLength(1),
+      );
+    },
+  );
 }

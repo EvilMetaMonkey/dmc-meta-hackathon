@@ -245,8 +245,9 @@ Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library sessio
 - Git mode on Windows is verified only by CI (`windows-latest`), not on a real Windows machine.
 - **Muse Glimmer on Modal is not deployed.** Modal refused the app: "Please add a payment method
   to use L40S GPU functions" (a card is required for any GPU, even with credit). Mike chose not
-  to add one now. Until then, the `summary` role (summaries and lesson briefs) falls back to
-  Baseten Muse Spark Open, logged every time. Also untested: whether vLLM's on-the-fly FP8 fits
+  to add one now, so Modal is on hold: the `summary` role (summaries and lesson briefs) now
+  defaults to Baseten Muse Spark Open with a logged Fireworks fallback, and Modal is an opt-in
+  (`doc/README.md`). Also untested: whether vLLM's on-the-fly FP8 fits
   the 60 GB BF16 checkpoint on a 48 GB L40S. If it does not, use one A100-80GB with BF16
   (`deploy/modal/README.md`). No cold-start or warm latency has been measured yet. Glimmer is
   also not on this Mac (24 GiB, Apple M5; Ollama, LM Studio and llama.cpp are installed, but no
@@ -269,17 +270,19 @@ Last updated: 2026-10-28 by Claude (Glimmer, Fireworks and lesson library sessio
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. When Mike adds a payment method on Modal:
-   - run `modal run deploy/modal/glimmer.py::download` and `modal deploy deploy/modal/glimmer.py`;
-   - put the URL in `~/.config/dmc-doc/config.json`;
-   - run `doc models --check` twice (cold, then warm), record the latencies in `doc/README.md`,
-     and confirm it scales to zero.
-2. Lesson library part 2: draft a lesson automatically after a `dmc checkpoint restore` (still
+1. Lesson library part 2: draft a lesson automatically after a `dmc checkpoint restore` (still
    approved by hand).
-3. Then, per the spec's schedule: bisect (Oct 31; build on
+2. Then, per the spec's schedule: bisect (Oct 31; build on
    `checkpoint export`, and set up ignored dependencies such as `node_modules` and `.dart_tool`
    in each export, because export holds only protected files), push-to-talk voice
    (Nov 1), parallel timelines (Nov 1–2), demo and README (Nov 3), submit (Nov 4).
+
+### Before the demo (optional)
+
+- Deploy Muse Glimmer on Modal, if Mike adds a payment method: run
+  `modal run deploy/modal/glimmer.py::download` and `modal deploy deploy/modal/glimmer.py`, apply
+  the one-line opt-in in `doc/README.md`, run `doc models --check` twice (cold, then warm), record
+  the latencies in `doc/README.md`, and confirm it scales to zero.
 
 ## Session log
 

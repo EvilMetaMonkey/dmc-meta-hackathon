@@ -71,7 +71,8 @@ response timeouts are 90 s for hosted providers and 180 s for local.
 **Fallback:** one explicit, logged fallback per role, with no second hop. The log line starts
 with `FALLBACK:`. A fallback happens when the provider fails *after retries* (unreachable,
 timeout, 429/5xx, bad response) or, for Modal, when no deployment is configured. Defaults:
-`summary` modal → baseten, `workhorse` baseten → fireworks, `restore` meta → baseten. There is
+`summary` baseten → fireworks, `workhorse` baseten → fireworks, `restore` meta → baseten (and,
+with the Modal opt-in below, `summary` modal → baseten). There is
 no fallback for a missing or rejected key, a used-up budget, an answer cut off by the token
 limit, or from `local`, and none under `--local`.
 
@@ -105,7 +106,7 @@ Defaults, overridable in `config.json` under `roles`:
 
 | Role | Provider | Model | Use |
 |---|---|---|---|
-| `summary` | modal | `muse-glimmer` (fallback baseten) | Per-checkpoint summaries, lesson briefs |
+| `summary` | baseten | `meta-models/muse-spark-open-1026` (fallback fireworks) | Per-checkpoint summaries, lesson briefs |
 | `workhorse` | baseten | `meta-models/muse-spark-open-1026` (fallback fireworks) | Bisect explanations, lesson drafts |
 | `restore` | meta | `muse-spark-1.3` (fallback baseten) | Natural-language restore |
 | `planner`, `judge` | meta | `muse-wonder-1.0` | Parallel timelines |
@@ -179,6 +180,18 @@ Add a bulk_discount function to pricing.py for orders of 10 or more items
 Muse kept the 0–100 contract, added range validation and `bulk_discount`, and `checkout.py`
 still printed `60.0`. The brief came from Muse Spark Open on Baseten through the logged
 `summary` fallback, because the Modal Glimmer deployment is not up yet.
+
+### Opt-in: Muse Glimmer on Modal for `summary`
+
+Modal is on hold (it needs a card on file for GPUs). Once `deploy/modal/` is deployed, set its URL
+and switch the `summary` role to it with one line in `~/.config/dmc-doc/config.json`:
+
+```json
+{"providers": {"modal": {"baseUrl": "https://…modal.run/v1"}}, "roles": {"summary": {"provider": "modal", "model": "muse-glimmer", "fallbackProvider": "baseten"}}}
+```
+
+`DOC_MODAL_BASE_URL` can supply the URL instead. A failing or unconfigured Modal then falls back
+to Baseten, logged.
 
 ## Safety
 

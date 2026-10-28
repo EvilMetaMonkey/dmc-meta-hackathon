@@ -77,7 +77,19 @@ void main() {
 
   tearDown(() => home.deleteSync(recursive: true));
 
-  void writeConfig(Map<String, String> urls) {
+  /// The documented opt-in that puts the summary role on Modal.
+  const summaryOnModal = {
+    'summary': {
+      'provider': 'modal',
+      'model': 'muse-glimmer',
+      'fallbackProvider': 'baseten',
+    },
+  };
+
+  void writeConfig(
+    Map<String, String> urls, {
+    Map<String, Object?> roles = const {},
+  }) {
     File(p.join(home.path, 'config', 'config.json'))
       ..createSync(recursive: true)
       ..writeAsStringSync(
@@ -86,6 +98,7 @@ void main() {
             for (final entry in urls.entries)
               entry.key: {'baseUrl': entry.value},
           },
+          'roles': roles,
         }),
       );
   }
@@ -241,7 +254,10 @@ void main() {
       ]);
       addTearDown(baseten.close);
       addTearDown(modal.close);
-      writeConfig({'baseten': baseten.baseUrl, 'modal': modal.baseUrl});
+      writeConfig({
+        'baseten': baseten.baseUrl,
+        'modal': modal.baseUrl,
+      }, roles: summaryOnModal);
       await draftAndApprove(baseten);
 
       out.clear();
@@ -281,7 +297,10 @@ void main() {
       ]);
       addTearDown(baseten.close);
       addTearDown(modal.close);
-      writeConfig({'baseten': baseten.baseUrl, 'modal': modal.baseUrl});
+      writeConfig({
+        'baseten': baseten.baseUrl,
+        'modal': modal.baseUrl,
+      }, roles: summaryOnModal);
       await draftAndApprove(baseten);
 
       final record = File(p.join(home.path, 'agent-argv.txt'));

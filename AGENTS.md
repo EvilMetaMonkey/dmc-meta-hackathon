@@ -107,7 +107,8 @@ The most important product qualities are:
 - **Doc providers:** `meta` (Muse Spark 1.3, Muse Wonder), `baseten` (Muse Spark Open), `fireworks`
   (Muse Spark Open backup), `modal` (Mike's private Muse Glimmer deployment in `deploy/modal/`;
   base URL from the config or `DOC_MODAL_BASE_URL`, never committed) and `local` (this Mac).
-  Roles: `summary` modal → baseten, `workhorse` baseten → fireworks, `restore` meta → baseten;
+  Roles: `summary` baseten → fireworks (Modal Glimmer is an opt-in, see `doc/README.md`),
+  `workhorse` baseten → fireworks, `restore` meta → baseten;
   every fallback is logged and there is no second hop. `--local` means this Mac only and refuses
   Modal. Keys only from env vars (`MODEL_API_KEY`, `BASETEN_API_KEY`, `FIREWORKS_API_KEY`,
   `MODAL_GLIMMER_KEY`). See `doc/README.md`.
