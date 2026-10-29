@@ -88,6 +88,11 @@ class ProviderConfig {
   /// strictly either way.
   final bool jsonSchema;
 
+  /// Audio prices in USD per second, by model (Muse Voice Transcribe:
+  /// $0.18 per hour on Meta's pricing page, 2026-10-28, metered in whole
+  /// seconds). A model without one is shown with an unknown cost.
+  final Map<String, double> audioPrices;
+
   const ProviderConfig({
     required this.id,
     required this.baseUrl,
@@ -106,6 +111,7 @@ class ProviderConfig {
     this.reasoningStrength,
     this.wakeNotice,
     this.jsonSchema = false,
+    this.audioPrices = const {},
   });
 
   /// [baseUrl], or [baseUrlEnv]'s value when it is set.
@@ -136,6 +142,7 @@ class ProviderConfig {
     reasoningStrength: reasoningStrength,
     wakeNotice: wakeNotice,
     jsonSchema: jsonSchema,
+    audioPrices: audioPrices,
   );
 
   Map<String, Object?> toJson() => {
@@ -157,41 +164,46 @@ class ProviderConfig {
     'reasoningStrength': reasoningStrength,
     'wakeNotice': wakeNotice,
     'jsonSchema': jsonSchema,
+    'audioPrices': audioPrices,
   };
 
-  static ProviderConfig fromJson(String id, Map<String, Object?> json) =>
-      ProviderConfig(
-        id: id,
-        baseUrl: json['baseUrl'] as String? ?? '',
-        baseUrlEnv: json['baseUrlEnv'] as String?,
-        keyEnv: json['keyEnv'] as String?,
-        defaultModel: json['defaultModel'] as String,
-        description: json['description'] as String?,
-        hosted: json['hosted'] as bool? ?? true,
-        billing: ProviderBilling.values.firstWhere(
-          (value) => value.name == json['billing'],
-          orElse: () => ProviderBilling.tokens,
+  static ProviderConfig fromJson(
+    String id,
+    Map<String, Object?> json,
+  ) => ProviderConfig(
+    id: id,
+    baseUrl: json['baseUrl'] as String? ?? '',
+    baseUrlEnv: json['baseUrlEnv'] as String?,
+    keyEnv: json['keyEnv'] as String?,
+    defaultModel: json['defaultModel'] as String,
+    description: json['description'] as String?,
+    hosted: json['hosted'] as bool? ?? true,
+    billing: ProviderBilling.values.firstWhere(
+      (value) => value.name == json['billing'],
+      orElse: () => ProviderBilling.tokens,
+    ),
+    prices: {
+      for (final entry in ((json['prices'] as Map?) ?? const {}).entries)
+        entry.key as String: ModelPrice.fromJson(
+          (entry.value as Map).cast<String, Object?>(),
         ),
-        prices: {
-          for (final entry in ((json['prices'] as Map?) ?? const {}).entries)
-            entry.key as String: ModelPrice.fromJson(
-              (entry.value as Map).cast<String, Object?>(),
-            ),
-        },
-        budgetUsd: (json['budgetUsd'] as num?)?.toDouble(),
-        timeout: Duration(
-          seconds: (json['timeoutSeconds'] as num?)?.toInt() ?? 90,
-        ),
-        sendReasoningEffort: json['sendReasoningEffort'] as bool? ?? false,
-        tokenLimitField: json['tokenLimitField'] as String? ?? 'max_tokens',
-        sampling: {
-          for (final entry in ((json['sampling'] as Map?) ?? const {}).entries)
-            entry.key as String: entry.value as num,
-        },
-        reasoningStrength: json['reasoningStrength'] as String?,
-        wakeNotice: json['wakeNotice'] as String?,
-        jsonSchema: json['jsonSchema'] as bool? ?? false,
-      );
+    },
+    budgetUsd: (json['budgetUsd'] as num?)?.toDouble(),
+    timeout: Duration(seconds: (json['timeoutSeconds'] as num?)?.toInt() ?? 90),
+    sendReasoningEffort: json['sendReasoningEffort'] as bool? ?? false,
+    tokenLimitField: json['tokenLimitField'] as String? ?? 'max_tokens',
+    sampling: {
+      for (final entry in ((json['sampling'] as Map?) ?? const {}).entries)
+        entry.key as String: entry.value as num,
+    },
+    reasoningStrength: json['reasoningStrength'] as String?,
+    wakeNotice: json['wakeNotice'] as String?,
+    jsonSchema: json['jsonSchema'] as bool? ?? false,
+    audioPrices: {
+      for (final entry in ((json['audioPrices'] as Map?) ?? const {}).entries)
+        entry.key as String: (entry.value as num).toDouble(),
+    },
+  );
 }
 
 /// Which provider and model serve one role.
@@ -266,12 +278,23 @@ class DocConfig {
   final String reasoningEffort;
   final int maxRetries;
 
+  /// Per-workspace settings, keyed by the workspace root dmc reports:
+  /// `{"workspaces": {"/path/to/repo": {"bisectTest": "dart test"}}}`.
+  final Map<String, Map<String, Object?>> workspaces;
+
   const DocConfig({
     required this.providers,
     required this.roles,
     this.reasoningEffort = 'low',
     this.maxRetries = 3,
+    this.workspaces = const {},
   });
+
+  /// The test command `doc talk` uses for "bisect" in [root], if set.
+  String? bisectTestFor(String root) {
+    final value = workspaces[root]?['bisectTest'];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
 
   /// Defaults. Prices are each provider's published per-token prices
   /// (dev.meta.ai/docs/pricing-rate-limits and Baseten's model library,
@@ -292,6 +315,7 @@ class DocConfig {
         sendReasoningEffort: true,
         tokenLimitField: 'max_completion_tokens',
         jsonSchema: true,
+        audioPrices: {metaVoiceModel: 0.18 / 3600},
       ),
       'baseten': ProviderConfig(
         id: 'baseten',
@@ -393,6 +417,7 @@ class DocConfig {
     'roles': {
       for (final entry in roles.entries) entry.key: entry.value.toJson(),
     },
+    if (workspaces.isNotEmpty) 'workspaces': workspaces,
   };
 
   /// Read [file], filling anything it leaves out from [defaults].
@@ -425,6 +450,10 @@ class DocConfig {
       roles: roles,
       reasoningEffort: effort,
       maxRetries: (json['maxRetries'] as num?)?.toInt() ?? base.maxRetries,
+      workspaces: {
+        for (final entry in ((json['workspaces'] as Map?) ?? const {}).entries)
+          entry.key as String: (entry.value as Map).cast<String, Object?>(),
+      },
     );
   }
 }
