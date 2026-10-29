@@ -9,6 +9,7 @@ import 'bisect.dart';
 import 'cli.dart';
 import 'dmc_client.dart';
 import 'model_client.dart';
+import 'probe_runner.dart';
 import 'restore_command.dart';
 import 'summarize.dart';
 
@@ -130,14 +131,6 @@ class _BisectAbort implements Exception {
   const _BisectAbort(this.message);
 }
 
-/// The result of running one shell command in a probe.
-class _Run {
-  final int exitCode;
-  final bool timedOut;
-  final String output;
-  const _Run(this.exitCode, this.timedOut, this.output);
-}
-
 /// A setup command Doc can suggest for the files it recognises in the
 /// workspace root, or null. Suggestions are never run without `--setup`, a
 /// yes, or `--yes`.
@@ -155,13 +148,6 @@ String? suggestSetup(String root) {
     return 'python3 -m venv .venv && $pip install -q -e .';
   }
   return null;
-}
-
-String _tail(String text, int lines) {
-  final all = const LineSplitter().convert(text.trimRight());
-  return all.length <= lines
-      ? all.join('\n')
-      : '… (${all.length - lines} earlier lines)\n${all.skip(all.length - lines).join('\n')}';
 }
 
 /// `doc bisect --test "<command>" …`: find the agent turn where the tests
@@ -584,27 +570,18 @@ Future<ProbeRecord> _probe(
     throw _BisectAbort('dmc could not export ${point.description}: $errors');
   }
   try {
-    for (final link in links) {
-      final relative = p.normalize(link);
-      final target = p.join(directory, relative);
-      if (FileSystemEntity.typeSync(target, followLinks: false) !=
-          FileSystemEntityType.notFound) {
-        continue; // The export already has it.
-      }
-      Directory(p.dirname(target)).createSync(recursive: true);
-      Link(target).createSync(p.join(root, relative));
-    }
+    linkDependencies(root, directory, links);
     var setupFailed = false;
     final output = StringBuffer();
     if (setup != null && setup.isNotEmpty) {
-      final run = await _shell(context, setup, directory, timeout);
+      final run = await runShell(setup, directory, timeout, context.env);
       output.write(run.output);
       if (run.exitCode != 0 || run.timedOut) setupFailed = true;
     }
     var passed = false;
     var timedOut = false;
     if (!setupFailed) {
-      final run = await _shell(context, test, directory, timeout);
+      final run = await runShell(test, directory, timeout, context.env);
       output.write(run.output);
       timedOut = run.timedOut;
       passed = run.exitCode == 0 && !run.timedOut;
@@ -619,7 +596,7 @@ Future<ProbeRecord> _probe(
       timedOut: timedOut,
       setupFailed: setupFailed,
       elapsed: stopwatch.elapsed,
-      outputTail: _tail(output.toString(), bisectOutputTailLines),
+      outputTail: tailLines(output.toString(), bisectOutputTailLines),
     );
   } finally {
     if (!keep) {
@@ -629,42 +606,5 @@ Future<ProbeRecord> _probe(
         // The whole temporary root is removed at the end.
       }
     }
-  }
-}
-
-Future<_Run> _shell(
-  DocContext context,
-  String command,
-  String directory,
-  Duration timeout,
-) async {
-  final Process process;
-  try {
-    process = await Process.start(
-      Platform.isWindows ? 'cmd' : '/bin/sh',
-      Platform.isWindows ? ['/c', command] : ['-c', command],
-      workingDirectory: directory,
-      environment: context.env,
-      includeParentEnvironment: false,
-    );
-  } on ProcessException catch (error) {
-    return _Run(127, false, 'Could not start the command: ${error.message}\n');
-  }
-  final output = StringBuffer();
-  final done = Future.wait([
-    process.stdout
-        .transform(const Utf8Decoder(allowMalformed: true))
-        .forEach(output.write),
-    process.stderr
-        .transform(const Utf8Decoder(allowMalformed: true))
-        .forEach(output.write),
-  ]);
-  try {
-    final code = await process.exitCode.timeout(timeout);
-    await done.timeout(const Duration(seconds: 5), onTimeout: () => const []);
-    return _Run(code, false, output.toString());
-  } on TimeoutException {
-    process.kill(ProcessSignal.sigkill);
-    return _Run(-1, true, output.toString());
   }
 }
