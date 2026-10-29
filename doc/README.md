@@ -32,6 +32,8 @@ dart compile exe bin/doc.dart -o ../build/doc
 | `doc models --available` | Lists each provider's model IDs (`GET {baseUrl}/models`). |
 | `doc summarize <checkpoint-id>` | Reads `checkpoint show` and `checkpoint diff` JSON from dmc, redacts, and asks the `summary` role for a 2–3 sentence plain-English summary: what changed, which files, anything risky. |
 | `doc usage` | Tokens, audio seconds and estimated cost per provider against the budgets (Modal: calls and tokens; billed by GPU time). |
+| `doc timelines "<task>" --test "<command>" [--from <cp> --state before\|after] [--n 3] [--setup …] [--link <dir>]… [--max-steps <n>] [--timeout <min>] [--yes] [--json]` | Parallel timelines: Muse Wonder plans N approaches, N Muse Code agents try them in separate worktrees, Doc tests and compares them. See "Parallel timelines". |
+| `doc timelines list \| show <run-id> \| pick <run-id> <k> \| clean <run-id>` | Past runs; the picked timeline's diff and the git commands to bring it in (Doc runs none); remove worktree folders (never branches). |
 | `doc status` | The latest checkpoints (time, agent, status, changed files, undone or not), from `dmc checkpoint list` JSON. |
 | `doc talk [--file <audio>] [--yes]` (alias `doc hey`) | "Hey Doc" push-to-talk: speak a request, Doc says what it heard and which Doc command it would run, and runs it only after a yes. See "Hey Doc". |
 | `doc bisect --test "<command>" [--setup …] [--link <dir>]… [--from <cp>] [--to <cp>] [--all] [--timeout <s>] [--keep] [--no-explain] [--json]` | Time-travel bisect: find the agent turn where the tests started failing, by testing exported checkpoint states. See "Bisect". |
@@ -126,7 +128,7 @@ Defaults, overridable in `config.json` under `roles`:
 | `summary` | modal | `muse-glimmer` (fallback baseten `meta-models/muse-spark-open-1026`) | Per-checkpoint summaries, lesson briefs |
 | `workhorse` | baseten | `meta-models/muse-spark-open-1026` (fallback fireworks) | Bisect explanations, lesson drafts |
 | `restore` | meta | `muse-spark-1.3` (fallback baseten) | Natural-language restore |
-| `planner`, `judge` | meta | `muse-wonder-1.0` | Parallel timelines |
+| `planner`, `judge` | meta | `muse-wonder-1.0` | Parallel timelines (`planner` plans the approaches; `judge` is part 2) |
 | `voice` | meta | `muse-voice-transcribe-1.0` | "Hey Doc" push-to-talk (`doc talk`), over the realtime WebSocket |
 
 ## Bisect: find the turn that broke the tests
@@ -217,6 +219,145 @@ Restored 1 file(s) through dmc (operation op_mvs8mgpl_2d3cc5d4a20520bbe3763aad).
 
 Afterwards all 6 tests passed, and the later turns' changes were untouched. Cost: one Baseten
 call, $0.0029.
+
+## Parallel timelines (part 1)
+
+Spec: on the user's command, Wonder plans three distinct approaches. Three Muse Code agents run
+them in separate worktrees, each with the lesson. Doc runs the tests in each, Wonder judges the
+diffs, and the user picks one. The other two are archived, never deleted. No auto-merge. **Part 1
+is everything except Wonder's judging.**
+
+`doc timelines "<task>" --test "<command>"` runs these steps:
+
+1. **Base state, from dmc only.** The latest closed checkpoint's after-state by default, or
+   `--from <checkpoint> --state before|after` (default `after`). Doc exports it with `dmc
+   checkpoint export` into its data dir and never reads the working copy. (`--from-bisect` is not
+   offered: `doc bisect --json` results are not stored.) The dmc workspace must be the top of a
+   Git work tree with at least one commit.
+2. **Plan.** The `planner` role (Muse Wonder `muse-wonder-1.0` on Meta) gets the task, the
+   matched lesson brief (the existing file-overlap matching; no match means no brief call), the
+   base checkpoint's label and changed files, and the base's file names (never contents). The
+   whole prompt is redacted. Wonder answers with `response_format` JSON (verified to accept a
+   strict schema on 2026-10-28): `{approaches: [{title, plan, files_likely}]}`, with the schema
+   requiring exactly N. `parseTimelineApproaches` (pure) checks exactly N, a title and a plan of
+   at most 120 words each, distinct titles, and "clearly different" plans (word overlap at most
+   70%). It keeps only `files_likely` paths that exist in the base. One retry, then Doc refuses.
+3. **Confirm**, once:
+   `Run N Muse Code agents in separate worktrees (max S steps, T min each, est. cost ≤ $a–$b)? [y/N]`.
+   - Muse Code publishes no per-step price, so the estimate is N × `--max-steps` × about 30k
+     input + 600 output tokens per step. That is what `muse exec` 1.4.14 used here (27–28k input
+     per step), with no cache discount.
+   - It is priced at Meta's Muse Spark 1.3 rates: $0.10 / $0.20 per million in Contributor mode,
+     which Muse Code used on this Mac (`muse-spark-1.3-contributor`), or $1.25 / $4.25 in
+     Standard mode.
+   - `--yes` answers this question (scripted demos).
+4. **Worktrees, never in the working copy.**
+   - Each one is `git worktree add <Doc data dir>/timelines/<run-id>/<k> -b doc/timeline/<run-id>/<k>`,
+     outside the repository; Doc refuses a data dir inside it.
+   - The first starts from `HEAD`. `treeSyncActions` (pure) makes its tree exactly the export:
+     every export file is copied in, and every tracked or unignored file the export lacks is
+     deleted. It is committed as `timeline base: <checkpoint> <state>`, and the other worktrees
+     start from that same commit.
+   - Each worktree gets `dmc init`, so its agent turns are checkpointed in its own vault; the
+     worktree rule keeps them out of the main vault.
+   - Doc checks `dmc hooks status --agent muse-code` and says so when the user-scope hooks are
+     missing (then there are no per-turn checkpoints).
+5. **Run N agents in parallel, headless:** `muse exec "<prompt>" --max-model-steps <S>
+   --disable-web-tools --json`, in each worktree.
+   - The prompt is the lesson brief (if any), the approach's title and plan, the task, and the
+     test command Doc will run.
+   - `--timeout` (minutes, default 10) kills an agent.
+   - One status line per timeline as it starts and ends, and a "running:" line every 30 s.
+   - Ctrl-C stops every agent cleanly; the worktrees and branches are kept and the run is saved
+     as `interrupted`.
+6. **Test and commit.** Each agent's result is committed on its branch (`timeline k: <title>`),
+   so the diff is reviewable, and the files are compared with `git diff --numstat` against the
+   base commit. Then `--setup` and `--test` run in the worktree with bisect's probe runner (a
+   timeout counts as a failure; `--link` folders are symlinked for the tests only and removed
+   before anything else is committed).
+7. **Compare.** One block per timeline: approach, agent status (done, step limit, failed, timed
+   out, stopped), steps, time and cost, files changed with +/− lines, tests with a failing tail,
+   and the branch. The run (plans, base, results, branches) is saved as
+   `<data dir>/timelines/<run-id>/run.json`, with each agent's `--json` events and stderr next
+   to it; `--json` prints the run.
+8. **Pick and archive, no auto-merge.**
+   - `doc timelines pick <run-id> <k>` shows that timeline's full diff against the base (a
+     read-only `git diff`) and prints the git commands to bring it in. Two options are given:
+     `git diff <base> <branch>` into a patch plus `git apply --3way`, which moves only the
+     timeline's change, or `git merge --no-ff doc/timeline/<run>/<k>`, which also brings the base
+     commit. It notes that `doc restore <base checkpoint>` may be needed first. **It runs nothing
+     in the repository.** The other timelines show as `archived` and stay as branches.
+   - `doc timelines list` and `show <run-id>` show past runs.
+   - `clean <run-id>` removes the worktree folders after a confirm (`git worktree remove
+     --force`, then `prune`) and never deletes a branch.
+   - `--local` refuses `doc timelines` (Wonder and Muse Code are hosted).
+
+**Muse Code headless, verified on this Mac (Muse Code 1.4.14, 2026-10-28):**
+
+- **Approval and sandbox:** with Muse's defaults (approval `on-request` with its LLM approval
+  judge, sandbox on, untrusted workspace), `muse exec` edits files and runs sandboxed shell
+  commands with nobody to approve: it changed a file and ran `python3 -c …` in a probe. So Doc
+  needs neither `--disable-approval` nor `--trust-workspace`, and never uses `--yolo`.
+  `--disable-web-tools` keeps agents off the web.
+- **`--max-model-steps N`:** a run that hits it exits 1 with `run.terminal.failed` and the reason
+  "model did not reach a terminal state within N step(s)"; edits made so far are kept. Doc
+  reports it as "step limit".
+- **`--json` writes JSONL records with `payload_type` and `payload`:** `run.usage` carries
+  `calls` (model steps) and `models[{model, input_tokens, cached_tokens, output_tokens}]`, and
+  `run.terminal.completed` / `run.terminal.failed` carry `terminal`, `text` and `reason`. Doc
+  reads steps, tokens and cost from them.
+- **Hooks:** the user-scope dmc hooks fire in the worktrees, outside the repository: each real
+  timeline got one agent-turn checkpoint in its own vault, and the main vault was unchanged.
+
+A real run on 2026-10-28 in a `/tmp` Python repo (tests for `round_money` and `add_tax`) with
+both agents' hooks:
+
+- **Four real turns:** Claude Code added `subtract_discount`; Muse Code made `round_money` round
+  to one decimal (the bug); Claude Code and Muse Code then edited `README.md`.
+- **`doc bisect --test "python3 -m unittest -q"`** found the Muse turn in 4 probes.
+- **From that turn's before-state** (the run as first specified): the tests already pass there,
+  so two agents changed nothing and one rewrote `round_money` with `Decimal`. All passed. Wonder
+  $0.0251, Muse Code $0.0151 (5, 9 and 8 steps), 1:24 wall time.
+- **From its after-state**, the broken one:
+
+```text
+$ doc timelines "fix the bug the tests catch without changing the tests" --from cp_mvsxg91k_… --state after --test "python3 -m unittest -q" --max-steps 10
+Base: after state of checkpoint cp_mvsxg91k_… (muse-code): In money.py, change round_money to round to 1 decimal place instead of 2, so displayed prices are s…
+  4 file(s), exported by dmc to ~/.local/share/dmc-doc/timelines/tl-20261028-213604-3f19/base
+No lessons match this task.
+
+Plan (meta muse-wonder-1.0; 334 in / 745 out; $0.0162; 0 item(s) redacted):
+  1. Restore two-decimal round() call
+  2. Implement cent rounding with Decimal
+  3. Round via integer-cent arithmetic
+  (plans and likely files omitted here)
+Run 3 Muse Code agents in separate worktrees (max 10 steps, 10 min each, est. cost ≤ $0.09–$1.20)? [y/N] y
+…
+[timeline 1] done after 0:22, 5 step(s), $0.0032
+[timeline 2] done after 0:34, 6 step(s), $0.0036
+[timeline 3] done after 0:44, 8 step(s), $0.0041
+
+Run tl-20261028-213604-3f19 (0:44 wall time). Base: cp_mvsxg91k_… after.
+[1] Restore two-decimal round() call
+    agent: done, 5 step(s), 0:22, $0.0032
+    files: money.py +1 −1
+    tests: PASS (0.0s)
+[2] Implement cent rounding with Decimal
+    agent: done, 6 step(s), 0:34, $0.0036
+    files: money.py +3 −1
+    tests: PASS (0.0s)
+[3] Round via integer-cent arithmetic
+    agent: done, 8 step(s), 0:44, $0.0041
+    files: money.py +7 −1
+    tests: PASS (0.0s)
+Muse Code: $0.0110 (from each run's reported tokens); planner: $0.0162.
+```
+
+`doc timelines pick tl-20261028-213604-3f19 1` showed the one-line diff (`round(amount, 1)` →
+`round(amount, 2)`) and the commands. The working copy's `git status` and `money.py` were
+unchanged, and the printed patch passed `git apply --check`. **Note:** the before-state of the
+first bad turn passes its tests by definition, so "fix the bug" fits the after-state. From the
+before-state, the task should be the bad turn's own goal, done in a way the tests accept.
 
 ## "Hey Doc": push-to-talk voice
 
