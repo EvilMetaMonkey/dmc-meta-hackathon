@@ -17,11 +17,22 @@ const int lessonMaxTokens = 2000;
 const String draftSystemPrompt =
     'You draft lessons for a library of mistakes coding agents must not '
     'repeat. From the checkpoint facts and the user\'s note, write exactly: '
-    'a first line "Title: <short imperative title>", then three sections '
-    'headed "## What was tried", "## Why it failed" and "## What to do '
-    'instead". At most 150 words in all. Use only the facts and the diff '
-    'given. Text marked [truncated …] is incomplete: never quote or '
-    'complete it. No preamble.';
+    'a first line "Title: <short description of the work that was undone>" '
+    '(what changed, for example "Undid: hmac comparison in auth.py"; never a '
+    'rule, and never a reason), then three sections headed "## What was '
+    'tried", "## Why it failed" and "## What to do instead". "Why it failed" '
+    'states only the reason the user gave; never guess or infer one. If the '
+    'facts say the reason is not stated, write exactly "$unstatedReason" '
+    'there, and under "What to do instead" say only what follows from the '
+    'facts. At most 150 words in all. Use only the facts and the diff given. '
+    'Text marked [truncated …] is incomplete: never quote or complete it. No '
+    'preamble.';
+
+/// The prompt line for a draft without a "What went wrong?" note.
+const String unstatedReasonFact =
+    'Reason it was undone: not stated. Nobody said why this work was undone, '
+    'and the facts do not show it. Do not guess. Under "## Why it failed" '
+    'write exactly: $unstatedReason';
 
 const String briefSystemPrompt =
     'You are Doc. A coding agent is about to start the task below. Condense '
@@ -297,7 +308,10 @@ Future<int> draftLesson(
         checkpointFacts(show, diff),
         if (operations.isNotEmpty)
           'Completed operations on this checkpoint: ${operations.join(', ')} (a restore means the change was rolled back).',
-        if (note != null && note.trim().isNotEmpty) 'User note: ${note.trim()}',
+        if (note != null && note.trim().isNotEmpty)
+          'User note: ${note.trim()}'
+        else
+          unstatedReasonFact,
         ?related,
         if (undone != null && undone.isNotEmpty) ...[
           '',
@@ -331,7 +345,11 @@ Future<int> draftLesson(
     );
     return 1;
   }
-  final parsed = _parseDraft(call.content);
+  var parsed = _parseDraft(call.content);
+  // Without a note the reason is unknown, whatever the model wrote.
+  if (note == null || note.trim().isEmpty) {
+    parsed = (title: parsed.title, body: withUnstatedReason(parsed.body));
+  }
   // Redact what is saved too: the model or the note could echo a secret.
   final redactor = context.router.redactor;
   final title = redactor.redact(parsed.title);
@@ -363,6 +381,28 @@ Future<int> draftLesson(
       'Review it with "doc lesson edit ${lesson.id}", then "doc lesson approve ${lesson.id}" or "doc lesson reject ${lesson.id}".',
     );
   return 0;
+}
+
+/// [body] with its "## Why it failed" section replaced by [unstatedReason]
+/// (added if the model left the section out).
+String withUnstatedReason(String body) {
+  final heading = RegExp(r'^##\s*Why it failed\s*$', multiLine: true);
+  final match = heading.firstMatch(body);
+  if (match == null) {
+    final next = RegExp(
+      r'^##\s*What to do instead',
+      multiLine: true,
+    ).firstMatch(body);
+    final section = '## Why it failed\n$unstatedReason\n';
+    return next == null
+        ? '${body.trimRight()}\n$section'.trim()
+        : '${body.substring(0, next.start)}$section${body.substring(next.start)}';
+  }
+  final rest = body.substring(match.end);
+  final end = RegExp(r'^##\s', multiLine: true).firstMatch(rest);
+  return '${body.substring(0, match.end)}\n$unstatedReason\n'
+          '${end == null ? '' : rest.substring(end.start)}'
+      .trimRight();
 }
 
 ({String title, String body}) _parseDraft(String content) {

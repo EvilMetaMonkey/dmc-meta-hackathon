@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-28 by Claude (Glimmer and natural-language restore session)
+Last updated: 2026-10-28 by Claude (voice session)
 
 ## Done
 
@@ -356,6 +356,72 @@ Last updated: 2026-10-28 by Claude (Glimmer and natural-language restore session
     "Edit(<file>)"` and Muse Code with its defaults plus `--disable-shell --disable-web-tools`
     (a blanket-approval launch was refused by this session's permission check).
 
+- **Lesson drafts no longer invent reasons** (branch `hackathon/voice`). A real draft after an NL
+  restore had been titled "Do not modify protected auth.py" for what was a good security fix.
+  Without a "What went wrong?" note the prompt now says the reason is not stated and must not be
+  guessed, the title describes the undone work, Doc sets "Why it failed" to "Not stated — add the
+  reason before approving." whatever the model writes, and `doc lesson approve` refuses that
+  draft until it is edited. Verified by a new test in `doc/test/lesson_cli_test.dart` (fake
+  provider; checks the prompt text for the no-note case, the replaced section, the refused
+  approval, and that a note still goes through).
+- **"Hey Doc" push-to-talk** (`doc talk`, alias `doc hey`; Doc only, dmc unchanged).
+  - Meta's realtime docs, read on 2026-10-28, differ from what we expected:
+    - The key goes in a JSON handshake frame (`authorization.accessToken: "Bearer …"`,
+      `audioEncoding` `PCM_16KHZ`/`PCM_24KHZ`, `model`, `mode: PUSH_TO_TALK`, `partialMode`,
+      `keywords`); the Authorization header is ignored. The reply is `{sessionId}`.
+    - Audio goes as raw binary PCM16 frames (Doc sends 80 ms, as Meta's example does), paced in
+      real time (1008 on backlog or slow ingress).
+    - `{"type":"endStream"}` ends input.
+    - Events are `transcript` (`transcript`, `final`, `audioProcessedMs`), `audioProgress`,
+      `speechStart`/`speechEnd`/`speechComplete`, `speaker` and `error`.
+    - There is no `session.update`, `input_audio_buffer.*`, `…transcription.delta`/`completed`
+      or usage event.
+    - A buffered upload endpoint does exist (`POST /v1/asr/transcribe`, multipart WAV ≤ 10 min);
+      Doc does not use it.
+    - Price: $0.18 per hour of audio, whole seconds, rounded down.
+    - All of this is recorded in `doc/README.md`.
+  - Behaviour:
+    - Space or Enter starts and stops (30 s at most), Esc cancels without `endStream`, and the
+      terminal is restored on every path.
+    - `--file` streams at real-time pace (PCM16 WAV read directly, else sox or ffmpeg converts).
+    - File names from recent checkpoints are sent as recognition `keywords`.
+    - The redacted transcript is routed by the workhorse role (JSON schema, one retry).
+      `planVoiceAction` (pure) maps it to one command, and nothing runs without "Run it? [y/N]"
+      (`--yes` never answers it for restore or bisect).
+    - Restore gets the transcript itself.
+    - `--local` is refused.
+    - Usage records billed audio seconds.
+    - Also new: `doc status` and a per-workspace `bisectTest` config.
+  - Verified by 7 client tests against a fake realtime server (handshake fields, paced 80 ms
+    frames ≤ 4 s, `endStream`, partials, final transcript, error event, 1008, refused handshake,
+    cancel sends nothing more), 9 pure routing tests, and 10 CLI tests:
+    - `--file` streaming;
+    - "no" runs nothing;
+    - "yes" runs NL restore with the transcript;
+    - `--yes` refused for restore but used for lessons;
+    - unknown and low confidence;
+    - redaction;
+    - bisect from config and summarize_latest;
+    - `--local`;
+    - live turn with the terminal restored;
+    - Esc before and during a turn;
+    - a 1008 error with the terminal restored and the pending key drained.
+  - Real check on the Mac, 2026-10-28, in `/tmp/voice-demo` (both hooks; four real turns, Muse
+    Code's turn 2 rewrote `auth.py`):
+    - `doc talk --file` on a 2.3 s `say -v Karen` WAV of "take me back to before it touched
+      auth". The transcript came 188 ms after the end of the audio (149–195 ms over 7 runs) and
+      was exact, so Doc ran NL restore. Muse Spark picked the auth turn at 0.95 and planned 3
+      steps; "n" at apply changed nothing. Whole run 8.1 s.
+    - With the default `say` voice "auth" came back as "off" (keywords did not fix it). The
+      restore then went to the choice screen at 0.40, and nothing changed.
+  - Cost: 7 transcriptions, 14 s billed ($0.0007); 7 Baseten routing calls ($0.0097); 2 Meta
+    restore calls ($0.0088).
+  - Hooks uninstalled (Muse `settings.json` back to the same SHA-256), repo removed.
+  - Gates on the Mac: dmc analyzer clean, 223 tests, Haven contract 3; Doc analyze clean, 148
+    tests. PR #10 (`hackathon/voice`): CI passed on ubuntu, macOS, macOS Intel and Windows in
+    both the push and pull_request runs for `bf3d9fe`. dmc ran 223 tests (Windows 221 plus 2
+    skipped), the Haven contract 3 and Doc 148 on every platform.
+
 ## In progress
 
 - Nothing yet.
@@ -389,7 +455,18 @@ Last updated: 2026-10-28 by Claude (Glimmer and natural-language restore session
   Some bisect CLI tests (timeout, `--link`, a crashing command) are POSIX-only; Windows CI covers
   the rest.
 - Lesson drafts can only explain *why* a change failed if someone says so (the "What went
-  wrong?" answer or `--note`); dmc records what changed, not why.
+  wrong?" answer or `--note`); dmc records what changed, not why. Without it the draft now says
+  "Not stated" and cannot be approved until edited.
+- **Voice, not yet verified with a person:** no live `doc talk` with the microphone was run (this
+  session had no interactive terminal and nobody spoke), so the macOS microphone permission
+  prompt, the raw-mode key handling and the live partial line are tested with fakes only. The
+  real transcription was verified with `--file` on synthetic speech (`say`). SoX is not installed
+  on the Mac, so the mic path is ffmpeg/AVFoundation (`:0`, MacBook Pro Microphone). On Linux and
+  Windows only `rec` is used for the mic. Ctrl-C in raw mode relies on the terminal still
+  sending SIGINT.
+- Voice recognition misheard "auth" as "off" for most synthetic voices, even with `auth` in the
+  recognition keywords. NL restore's confidence check caught it (choice screen, nothing
+  changed).
 - **The Fireworks key was exposed once.** Before line 49 of `~/.zshrc` was fixed, a new zsh
   printed it in an error message, and that appeared in one tool output in this session. Mike
   should rotate the Fireworks key.
@@ -408,10 +485,11 @@ Last updated: 2026-10-28 by Claude (Glimmer and natural-language restore session
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. "Hey Doc" push-to-talk voice (no wake word), with Muse Voice Transcribe
-   (`muse-voice-transcribe-1.0`, the `voice` role).
-2. Then, per the spec's schedule: parallel timelines (Nov 1–2), demo and README (Nov 3), submit
-   (Nov 4).
+1. Parallel timelines, part 1: from the last good checkpoint, three Muse Code agents try three
+   approaches in separate worktrees (planner and judge on Muse Wonder).
+2. A live `doc talk` with Mike at the microphone (first-run permission prompt, Space/Enter,
+   Esc), ideally with SoX installed (`brew install sox`).
+3. Then, per the spec's schedule: demo and README (Nov 3), submit (Nov 4).
 
 ### Before the demo
 
@@ -422,6 +500,12 @@ Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 ## Session log
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
+
+- 2026-10-28 · Claude · Voice (branch `hackathon/voice`): lesson drafts stop inventing reasons;
+  `doc talk` push-to-talk on Meta's realtime transcription (protocol checked against Meta's docs,
+  which differ from the brief), pure routing to Doc commands with a yes before anything runs,
+  `--file`, `doc status`. Verified with tests and a real `--file` run through the NL-restore plan
+  ($0.02 in all). Left open: a live microphone run with a person.
 
 - 2026-10-28 · Claude · Glimmer and natural-language restore (branch
   `hackathon/glimmer-nl-restore`): the bisect `--link` cleanup test; Muse Glimmer deployed on

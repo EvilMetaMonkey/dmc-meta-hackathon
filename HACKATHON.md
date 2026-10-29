@@ -86,7 +86,7 @@ web page.
 | Muse Spark Open (`meta-models/muse-spark-open-1026`) | Baseten, with Fireworks (`accounts/fireworks/models/muse-spark-open`) as the logged backup (skipped, and reported, when its key is missing or rejected) | The workhorse: lesson drafts and bisect explanations; also the fallback for summaries, briefs and restore |
 | Muse Wonder (`muse-wonder-1.0`) | Meta Model API | Plans the three timelines and judges the results |
 | Muse Glimmer 30B (`meta-models/Muse-Glimmer-30B`) | A private deployment on Modal (vLLM 0.28.0, one L40S, FP8; `deploy/modal/`), with a logged Baseten fallback; this Mac for `doc --local` | Per-checkpoint summaries and lesson briefs. Lesson matching itself is a fixed rule, not a model |
-| Muse Voice Transcribe (`muse-voice-transcribe-1.0`) | Meta Model API | "Hey Doc" push-to-talk |
+| Muse Voice Transcribe (`muse-voice-transcribe-1.0`) | Meta Model API, realtime WebSocket (`wss://api.meta.ai/v1/asr/realtime`); live since 2026-10-28 | "Hey Doc" push-to-talk (`doc talk`): speech to text, then the workhorse role picks a Doc command, which runs only after a yes |
 
 Model IDs were confirmed with `GET /models` on 2026-10-27. Role routing, prices and budgets are
 in [doc/README.md](doc/README.md).

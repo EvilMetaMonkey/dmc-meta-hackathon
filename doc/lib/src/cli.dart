@@ -12,6 +12,7 @@ import 'restore_command.dart';
 import 'model_client.dart';
 import 'model_router.dart';
 import 'summarize.dart';
+import 'talk_command.dart';
 import 'usage.dart';
 
 /// Room for reasoning plus a 2-3 sentence answer.
@@ -29,7 +30,17 @@ Commands:
                                    tiny prompt per provider; --available lists
                                    each provider's model IDs.
   summarize <checkpoint-id>        Summarize a checkpoint in plain English.
-  usage                            Tokens and estimated cost per provider.
+  usage                            Tokens, audio seconds and estimated cost per
+                                   provider.
+  status                           The latest checkpoints, from dmc's JSON.
+  talk [--file <audio>] [--yes]    "Hey Doc" push-to-talk (alias: hey). Press
+                                   Space or Enter to talk and again to stop
+                                   (Esc cancels; 30 s at most). Muse Voice
+                                   Transcribe turns it into text, the
+                                   workhorse role picks a Doc command, and it
+                                   runs only after you say yes (--yes never
+                                   answers that for restore or bisect).
+                                   --file streams a recording instead.
 
   bisect --test "<command>" [--setup "<command>"] [--link <dir>]... [--from <cp>]
          [--to <cp>] [--all] [--timeout <s>] [--keep] [--no-explain] [--json]
@@ -107,6 +118,7 @@ ArgParser _parser() => ArgParser()
   ..addFlag('keep', negatable: false)
   ..addFlag('no-explain', negatable: false)
   ..addFlag('json', negatable: false)
+  ..addOption('file')
   ..addOption('limit')
   ..addFlag('diff', negatable: false)
   ..addFlag('help', abbr: 'h', negatable: false);
@@ -120,6 +132,7 @@ Future<int> runDoc(
   StringSink? err,
   ChatClient? client,
   String? Function()? readLine,
+  VoiceDeps? voice,
 }) async {
   final env = environment ?? Platform.environment;
   final stdoutSink = out ?? stdout;
@@ -176,6 +189,15 @@ Future<int> runDoc(
     out: stdoutSink,
     log: log,
     readLine: readLine ?? () => stdin.readLineSync(),
+    runSubcommand: (subArguments) => runDoc(
+      subArguments,
+      environment: env,
+      out: stdoutSink,
+      err: stderrSink,
+      client: router.client,
+      readLine: readLine,
+      voice: voice,
+    ),
   );
 
   try {
@@ -196,6 +218,10 @@ Future<int> runDoc(
         return await runRestoreCommand(context);
       case 'bisect':
         return await runBisectCommand(context);
+      case 'talk' || 'hey':
+        return await runTalkCommand(context, voice ?? const VoiceDeps());
+      case 'status':
+        return await _status(context);
       default:
         log('Unknown command "${args.rest.first}".\n\n$docUsage');
         return 2;
@@ -219,6 +245,10 @@ class DocContext {
   /// Reads one line of the user's answer (for `doc start`'s question).
   final String? Function() readLine;
 
+  /// Runs another Doc command in-process with the same environment, output
+  /// and providers (for `doc talk`).
+  final Future<int> Function(List<String> arguments)? runSubcommand;
+
   const DocContext({
     required this.args,
     required this.env,
@@ -228,6 +258,7 @@ class DocContext {
     required this.out,
     required this.log,
     required this.readLine,
+    this.runSubcommand,
   });
 
   /// The dmc workspace Doc works on: `--workspace`, else the current dir.
@@ -274,7 +305,7 @@ Future<int> _models(DocContext context) async {
         ? ''
         : '  (fallback: ${route.fallbackProvider!.id} ${route.fallbackModel}${unavailable == null ? '' : '; ${route.fallbackProvider!.id} unavailable, skipped'})';
     out.writeln(
-      '${_pad(role, 11)}${_pad(route.provider.label, 33)}${_pad(route.model, 43)}${context.keyStatus(route.provider)}${roleConfig.chat ? '' : '  (transcription; not wired up yet)'}$fallback',
+      '${_pad(role, 11)}${_pad(route.provider.label, 33)}${_pad(route.model, 43)}${context.keyStatus(route.provider)}${roleConfig.chat ? '' : '  (realtime transcription for doc talk)'}$fallback',
     );
     if (roleConfig.chat) {
       primaries.add(route.provider.id);
@@ -510,6 +541,70 @@ int _usage(DocContext context) {
     context.out.writeln(
       '${_pad(provider.id, 10)}${_pad('${used.calls}', 7)}${_pad('${used.promptTokens}', 11)}'
       '${_pad('${used.completionTokens}', 12)}${_pad(cost, 12)}$limit',
+    );
+  }
+  for (final provider in context.config.providers.values) {
+    final seconds = (usage[provider.id] ?? const ProviderUsage()).audioSeconds;
+    if (seconds > 0) {
+      context.out.writeln(
+        'Audio on ${provider.id}: $seconds s billed (included in its cost above).',
+      );
+    }
+  }
+  return 0;
+}
+
+/// `doc status`: the latest checkpoints, from `dmc checkpoint list` JSON
+/// (dmc's own `status` has no JSON mode).
+Future<int> _status(DocContext context) async {
+  final Map<String, Object?> listed;
+  try {
+    listed = await (await context.dmc()).runJson([
+      'checkpoint',
+      'list',
+      '--limit',
+      '1000',
+    ], workspace: context.workspace);
+  } on DmcException catch (error) {
+    context.log(error.message);
+    return 1;
+  }
+  if (listed['ok'] != true) {
+    context.log('dmc checkpoint list failed: ${listed['errors']}');
+    return 1;
+  }
+  final items =
+      ((listed['data'] as Map)['checkpoints'] as List).whereType<Map>().toList()
+        ..sort(
+          (a, b) => (b['createdAt'] as num).compareTo(a['createdAt'] as num),
+        );
+  final active = items.where(
+    (item) => const {'creating', 'open', 'closing'}.contains(item['status']),
+  );
+  context.out
+    ..writeln(
+      'Workspace ${(listed['workspace'] as Map?)?['path'] ?? context.workspace}: ${items.length} checkpoint(s).',
+    )
+    ..writeln(
+      active.isEmpty
+          ? 'No checkpoint is open.'
+          : 'Open: ${active.first['id']} (${active.first['status']}).',
+    );
+  for (final item in items.take(5)) {
+    final agent = item['agent'];
+    final at = DateTime.fromMillisecondsSinceEpoch(
+      ((item['closedAt'] ?? item['createdAt']) as num).toInt(),
+    );
+    final undone = (item['operations'] as List? ?? const [])
+        .whereType<Map>()
+        .where((o) => o['status'] == 'completed')
+        .map((o) => o['direction'])
+        .toList();
+    context.out.writeln(
+      '  ${at.toIso8601String().substring(0, 19).replaceFirst('T', ' ')}  '
+      '${agent is Map ? agent['name'] : item['source']}  ${item['status']}  '
+      '${item['changedFileCount'] ?? '?'} changed${undone.isNotEmpty && undone.last == 'restore' ? ', undone' : ''}  '
+      '${item['label'] ?? '(no label)'}',
     );
   }
   return 0;

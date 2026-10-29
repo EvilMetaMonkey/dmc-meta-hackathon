@@ -119,6 +119,14 @@ The most important product qualities are:
   combined by `combineStepPreviews` (pure); any conflict stops it. Steps apply newest first
   through dmc after one confirmation, a failure offers `dmc checkpoint redo` for the applied
   steps, and nothing is forced.
+- **"Hey Doc" (`doc talk`, alias `doc hey`)** records only after Space/Enter (or streams
+  `--file`), through `rec` (SoX) or `ffmpeg`, and only Doc talks to Meta. Muse Voice Transcribe is
+  realtime only in Doc: the handshake frame carries the key, then 80 ms binary PCM16 frames paced
+  in real time, then `{"type":"endStream"}`; see `doc/README.md` for Meta's exact event names.
+  The redacted transcript goes to the workhorse role as JSON, `planVoiceAction` (pure) validates
+  it into one Doc command, and that command runs in-process only after "Run it? [y/N]" (`--yes`
+  never answers it for restore or bisect). The WebSocket client is behind `TranscriptionClient`.
+  `--local` refuses it. Usage records billed audio seconds.
 - **`doc restore` only drives dmc.** It previews with `dmc checkpoint restore <id> --json`, applies
   with `--apply` after the user agrees, never forces a conflict or recovery, then offers a lesson.
   To show the model the undone work, Doc exports the checkpoint's states with
@@ -131,6 +139,8 @@ The most important product qualities are:
   draft lessons (workhorse) and condense briefs (summary). Nothing enters the library without
   `doc lesson approve`, and a brief reaches an agent only after the user agrees (`--yes` is for
   scripted demos).
+  A draft without a "What went wrong?" note says "Why it failed: Not stated — add the reason
+  before approving." (the model is told not to guess), and approve refuses it until edited.
 
 ---
 
@@ -310,6 +320,7 @@ Use `docs/TESTER-READINESS-AUDIT.md` as the original audit and the Phase 2/3 han
   `dart run bin/doc.dart lessons [path]`, `dart run bin/doc.dart start <muse-code|claude-code> "<task>"`,
   `dart run bin/doc.dart restore <checkpoint-id> [--yes] [--no-lesson]`,
   `dart run bin/doc.dart restore "<request>" [--limit <n>] [--diff] [--yes] [--json]`,
+  `dart run bin/doc.dart talk [--file <audio>] [--yes]`, `dart run bin/doc.dart status`,
   `dart run bin/doc.dart lesson draft --last-restore`,
   `dart run bin/doc.dart bisect --test "<command>" [--setup …] [--link <dir>]… [--json]`. Its gate: `dart pub get --enforce-lockfile`,
   `dart analyze --fatal-infos`, `DMC_TEST_BIN=../build/dmc/bundle/bin/dmc dart test --concurrency=1`.

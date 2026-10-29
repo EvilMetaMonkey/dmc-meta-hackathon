@@ -16,4 +16,7 @@ export 'src/nl_restore_command.dart';
 export 'src/redaction.dart';
 export 'src/restore_command.dart';
 export 'src/summarize.dart';
+export 'src/talk_command.dart';
 export 'src/usage.dart';
+export 'src/voice_client.dart';
+export 'src/voice_intent.dart';

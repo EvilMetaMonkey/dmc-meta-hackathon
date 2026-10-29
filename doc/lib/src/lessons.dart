@@ -176,8 +176,14 @@ class Lesson {
       if (!isSafeRelativePath(file))
         'file "$file" is not a workspace-relative path',
     if (body.trim().isEmpty) 'the body is empty',
+    if (body.contains(unstatedReason))
+      '"Why it failed" still says the reason is not stated; add it with doc lesson edit',
   ];
 }
+
+/// The "Why it failed" text of a draft whose reason nobody gave. A draft
+/// that still says it cannot be approved.
+const String unstatedReason = 'Not stated — add the reason before approving.';
 
 bool isSafeRelativePath(String path) {
   if (path.isEmpty || path.startsWith('/') || path.contains('\\')) return false;
