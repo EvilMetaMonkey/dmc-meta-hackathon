@@ -417,6 +417,10 @@ Last updated: 2026-10-28 by Claude (voice session)
   - Cost: 7 transcriptions, 14 s billed ($0.0007); 7 Baseten routing calls ($0.0097); 2 Meta
     restore calls ($0.0088).
   - Hooks uninstalled (Muse `settings.json` back to the same SHA-256), repo removed.
+  - Gates on the Mac: dmc analyzer clean, 223 tests, Haven contract 3; Doc analyze clean, 148
+    tests. PR #10 (`hackathon/voice`): CI passed on ubuntu, macOS, macOS Intel and Windows in
+    both the push and pull_request runs for `bf3d9fe`. dmc ran 223 tests (Windows 221 plus 2
+    skipped), the Haven contract 3 and Doc 148 on every platform.
 
 ## In progress
 
