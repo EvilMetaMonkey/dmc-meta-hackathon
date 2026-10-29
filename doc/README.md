@@ -31,7 +31,9 @@ dart compile exe bin/doc.dart -o ../build/doc
 | `doc models --check` | Sends one tiny prompt per provider in use and shows latency, tokens and cost. A missing local server or model is said plainly. |
 | `doc models --available` | Lists each provider's model IDs (`GET {baseUrl}/models`). |
 | `doc summarize <checkpoint-id>` | Reads `checkpoint show` and `checkpoint diff` JSON from dmc, redacts, and asks the `summary` role for a 2–3 sentence plain-English summary: what changed, which files, anything risky. |
-| `doc usage` | Tokens and estimated cost per provider against the budgets (Modal: calls and tokens; billed by GPU time). |
+| `doc usage` | Tokens, audio seconds and estimated cost per provider against the budgets (Modal: calls and tokens; billed by GPU time). |
+| `doc status` | The latest checkpoints (time, agent, status, changed files, undone or not), from `dmc checkpoint list` JSON. |
+| `doc talk [--file <audio>] [--yes]` (alias `doc hey`) | "Hey Doc" push-to-talk: speak a request, Doc says what it heard and which Doc command it would run, and runs it only after a yes. See "Hey Doc". |
 | `doc bisect --test "<command>" [--setup …] [--link <dir>]… [--from <cp>] [--to <cp>] [--all] [--timeout <s>] [--keep] [--no-explain] [--json]` | Time-travel bisect: find the agent turn where the tests started failing, by testing exported checkpoint states. See "Bisect". |
 | `doc restore <checkpoint-id> [--yes] [--no-lesson]` | Rollback without amnesia: preview dmc's restore, ask, apply it through dmc, then offer to draft a lesson from the undone work. See "Restore". |
 | `doc restore "<request>" [--limit <n>] [--diff] [--yes] [--no-lesson] [--json]` | Natural-language restore ("take me back to before it touched auth"): the restore role picks a checkpoint and a mode, Doc validates it, previews every step with dmc and asks once. See "Natural-language restore". |
@@ -125,7 +127,7 @@ Defaults, overridable in `config.json` under `roles`:
 | `workhorse` | baseten | `meta-models/muse-spark-open-1026` (fallback fireworks) | Bisect explanations, lesson drafts |
 | `restore` | meta | `muse-spark-1.3` (fallback baseten) | Natural-language restore |
 | `planner`, `judge` | meta | `muse-wonder-1.0` | Parallel timelines |
-| `voice` | meta | `muse-voice-transcribe-1.0` | Push-to-talk (configured only; not wired up yet) |
+| `voice` | meta | `muse-voice-transcribe-1.0` | "Hey Doc" push-to-talk (`doc talk`), over the realtime WebSocket |
 
 ## Bisect: find the turn that broke the tests
 
@@ -215,6 +217,137 @@ Restored 1 file(s) through dmc (operation op_mvs8mgpl_2d3cc5d4a20520bbe3763aad).
 
 Afterwards all 6 tests passed, and the later turns' changes were untouched. Cost: one Baseten
 call, $0.0029.
+
+## "Hey Doc": push-to-talk voice
+
+Spec: "Hey Doc" push-to-talk voice, no wake word, using Muse Voice Transcribe.
+
+`doc talk` (or `doc hey`) prints "Press Space or Enter to talk (Esc to cancel)…". **Nothing is
+recorded or sent until a key is pressed.** Then it records and streams while you talk, showing
+the partial transcript live, until Space or Enter again (or 30 seconds), and prints the final
+transcript. Esc cancels: the socket is closed without `endStream` and nothing more is sent. The
+terminal is put in raw mode (no echo, no line buffering) only for the keys, and restored on every
+path, including errors and Ctrl-C. Keys are read in a helper isolate with `readByteSync`, so
+later questions (Run it?, restore's questions) still read whole lines normally.
+
+`doc talk --file <audio>` streams a recording instead, at real-time pace, for repeatable demos
+and tests. A 16-bit mono WAV at 16 or 24 kHz is read directly; anything else is converted to
+PCM16 mono 16 kHz with `sox` (preferred) or `ffmpeg`.
+
+**Microphone.** Doc records through an installed tool and is the only program that talks to
+Meta: `rec` from SoX (`rec -q -t raw -b 16 -e signed -c 1 -r 16000 -`), else on macOS
+`ffmpeg -f avfoundation -i :0 -ac 1 -ar 16000 -f s16le -` (`DOC_MIC_DEVICE` picks another
+AVFoundation input; list them with `ffmpeg -f avfoundation -list_devices true -i ""`). If neither is
+installed, Doc says: install SoX (`brew install sox`, which provides `rec`) or FFmpeg (`brew install
+ffmpeg`). **The first recording makes macOS ask whether the terminal app may use the
+microphone** (System Settings → Privacy & Security → Microphone); if it was denied, the tool
+records silence or fails until it is allowed there. On Mike's Mac SoX is not installed, so
+ffmpeg 8.1.2 is used (input `:0` is the MacBook Pro Microphone).
+
+**Meta's realtime transcription, as documented** (dev.meta.ai/docs/api-reference/voice/realtime,
+voice schemas and the Speech to text page, read on 2026-10-28). Doc follows these names exactly:
+
+- **Endpoint:** `wss://api.meta.ai/v1/asr/realtime?sessionId=<optional id>`, model
+  `muse-voice-transcribe-1.0`. Doc derives it from the `meta` base URL (`https` → `wss`).
+- **Handshake:** the first JSON text frame, within 10 seconds of connecting. **The key goes in the
+  frame, not in an `Authorization` header** (the header is ignored):
+  `{"authorization": {"accessToken": "Bearer <MODEL_API_KEY>"}, "audioEncoding": "PCM_16KHZ",
+  "model": "muse-voice-transcribe-1.0", "mode": "PUSH_TO_TALK", "partialMode": "CUMULATIVE",
+  "keywords": [...]}`. `audioEncoding` is required (`PCM_16KHZ` or `PCM_24KHZ`, the native rate);
+  `mode` is `PUSH_TO_TALK` (also `ENDPOINTING`, `DIARIZATION`); `keywords` and `languageBias` bias
+  recognition. The reply is `{"sessionId": "…"}`, the only server frame without a `type`.
+- **Audio:** raw signed 16-bit little-endian mono PCM in **binary frames** (not base64 JSON
+  events). Meta's example sends 80 ms frames, and Doc does too (2,560 bytes at 16 kHz). **Paced in
+  real time:** a backlog, or audio arriving slower than real time, closes the socket with 1008.
+- **End of input:** `{"type": "endStream"}`. Realtime has no other turn commit; in
+  `PUSH_TO_TALK` the client ends the turn by ending the stream. Keep reading until the server
+  closes with 1000.
+- **Server events** (dispatch on `type`, ignore unknown ones): `transcript` (`transcript`,
+  `final`, `audioProcessedMs`; with `CUMULATIVE` each partial replaces the last, and `final: true`
+  marks completion in `PUSH_TO_TALK`), `audioProgress` (`audioProcessedMs`), `speechStart`,
+  `speechEnd` and `speechComplete` (`turnId`, `transcript`), `speaker` (`label`) and `error`
+  (`message`, `sessionId`, optional `errorType`, `errorCode`, `errorParam`), sent just before the
+  server closes.
+- **Close codes:** 1000 normal, 1008 invalid request or pacing (retrying unchanged fails again),
+  1011 server failure (retry with backoff; also "Max session duration reached"), 1013 rate
+  limited. A session lasts at most 60 minutes.
+- **There is no usage event.** Doc takes the processed audio from the highest `audioProcessedMs`.
+  Meta bills **$0.18 per hour of audio processed, metered in whole seconds and rounded down**
+  (pricing page), so Doc records `floor(ms / 1000)` seconds at $0.00005 per second
+  (`providers.meta.audioPrices`; a model without a price is shown as "cost unknown"). Limits: 256
+  concurrent streams and 16,000 streams per hour.
+- These differ from what we expected before reading the docs: no `session.update`, no base64
+  `input_audio_buffer.append` (and no 4-second chunk limit: Doc's frames are 80 ms), no
+  `input_audio_buffer.commit`, and no `…transcription.delta` / `…completed` events. Meta also has
+  a buffered upload endpoint, `POST /v1/asr/transcribe` (multipart WAV, up to 10 minutes, with the
+  usual `Authorization` header). Doc does not use it: `--file` goes through the same realtime
+  path as the microphone.
+
+**Recognition hints.** Doc sends the names of files changed in the 10 most recent closed
+checkpoints (without extensions: `auth.py` → `auth`) plus "Doc" and "dmc" as `keywords`. Names
+only, never contents.
+
+**From transcript to action, never acting without a yes.** The transcript, redacted, goes to the
+`workhorse` role with a `response_format` JSON schema: `{command: "restore" |
+"summarize_latest" | "lesson_brief" | "lessons" | "bisect" | "status" | "unknown", text,
+confidence}`, parsed strictly with one retry. `planVoiceAction` (pure) validates it:
+
+| Command | Runs | Notes |
+|---|---|---|
+| `restore` | `doc restore "<the transcript>"` | The transcript itself, not the model's rewording, goes to natural-language restore, with all its previews and questions |
+| `summarize_latest` | `doc summarize <newest closed checkpoint>` | |
+| `lesson_brief` | `doc lesson brief --task "<text>"` | |
+| `lessons` | `doc lessons` | |
+| `bisect` | `doc bisect --test "<command>"` | The test command comes from `{"workspaces": {"<workspace root>": {"bisectTest": "…"}}}` in Doc's config, or Doc asks for one |
+| `status` | `doc status` | |
+
+Doc prints `I heard: "<transcript>" → I'll run: doc <command> … Run it? [y/N]` and runs the
+command in-process only on yes. An `unknown` command, confidence below 0.6, or an empty
+transcript runs nothing: Doc says what it heard and lists what it can do. **`--yes` answers "Run
+it?" for the read-only commands, never for restore or bisect**, and it is never passed on to the
+command itself.
+
+**Privacy.** Audio goes only to Meta, and only while recording (or while `--file` streams).
+`--local` refuses `doc talk`: there is no local transcription, so it says so and records nothing.
+`--show-prompt` is refused too, because a transcript needs audio sent first.
+
+A real run on 2026-10-28 in a `/tmp` repo after four real turns (Claude Code `slugify` in
+`utils.py`; Muse Code `hmac.compare_digest` in `auth.py`; Claude Code README; Muse Code
+`health()` in `app.py`). The recording is a 2.3 s WAV made with macOS `say -v Karen` (SoX's `rec`
+is not installed here, and nobody spoke into the microphone):
+
+```text
+$ doc talk --file auth-karen.wav
+Streaming auth-karen.wav (2.3 s) to Muse Voice Transcribe at real-time pace…
+  … take
+  … take me
+  … take me back to
+  … take me back to before
+  … take me back to before it
+  … take me back to before it touched
+  … take me back to before it touched auth.
+(meta muse-voice-transcribe-1.0; 2.3 s of audio sent, 2 s billed; final transcript 188 ms after the end of the audio; $0.000100)
+I heard: "take me back to before it touched auth." → I'll run: doc restore "take me back to before it touched auth."
+Run it? [y/N] y
+Doc's reading (meta muse-spark-1.3; 1121 in / 403 out; $0.003114; 0 item(s) redacted; confidence 0.95):
+  go back to before cp_mvsn7oni_… (muse-code, 2026-10-28 16:45:18): Checkpoint 3 is the only one that modified auth.py.
+
+Plan: go back to before cp_mvsn7oni_… (muse-code, 2026-10-28 16:45:18) (3 step(s), newest first):
+  1. cp_mvsnadvg_…  2026-10-28 16:47:18  muse-code: In app.py, add a function health() … (truncated by dmc)
+  2. cp_mvsna0c3_…  2026-10-28 16:47:09  claude-code: In README.md, add a short Usage section … (truncated by dmc)
+  3. cp_mvsn7oni_…  2026-10-28 16:45:18  muse-code: In auth.py, make check_password compare passwords with hmac.compare_digest … (truncated by dmc)
+Files that will change (against the working copy):
+  - README.md  +0 −6  put back the version from before step 2
+  - app.py     +0 −5  put back the version from before step 1
+  - auth.py    +1 −6  put back the version from before step 3
+Apply this restore (3 step(s), 3 file(s))? [y/N] n
+Nothing was changed.
+```
+
+The whole run took 8.1 s, of which 2.3 s was streaming at real-time pace. With the default macOS
+voice, "auth" came back as "off" even with `auth` in `keywords`. The restore role then answered
+at confidence 0.40 and showed the choice screen, and nothing changed. Four `say` voices were
+tried; Karen's came through as "auth".
 
 ## Natural-language restore
 
