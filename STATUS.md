@@ -473,6 +473,9 @@ Last updated: 2026-10-28 by Claude (timelines part 1 session)
   - CI test flake found and fixed: PR #11's first push run (`cc6c2a4`) failed on Windows. Its
     pull_request run passed on all four platforms. Three fake `muse` processes appended to one
     log file at once, and one line was lost. Each fake call now writes its own file.
+  - PR #11 (`hackathon/timelines-1`): CI passed on ubuntu, macOS, macOS Intel and Windows in
+    both the push and pull_request runs for `5ecf7cd`. dmc ran 223 tests (Windows 221 plus 2
+    skipped), the Haven contract 3 and Doc 162 on every platform.
 
 ## In progress
 
