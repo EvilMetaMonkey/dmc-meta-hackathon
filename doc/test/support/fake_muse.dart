@@ -7,13 +7,15 @@ import 'dart:io';
 /// - FAKE-WRONG: adds notes.txt and leaves state.txt alone;
 /// - FAKE-FAIL: stops at the step limit (exit 1);
 /// - FAKE-HANG: never finishes (killed by the timeout).
-/// Each call appends `{cwd, args}` to $FAKE_MUSE_LOG.
+/// Each call writes `{cwd, args}` to its own file in the folder
+/// $FAKE_MUSE_LOG (parallel appends to one file can lose a line on
+/// Windows).
 Future<void> main(List<String> args) async {
   final log = Platform.environment['FAKE_MUSE_LOG'];
   if (log != null) {
-    File(log).writeAsStringSync(
-      '${jsonEncode({'cwd': Directory.current.path, 'args': args})}\n',
-      mode: FileMode.append,
+    Directory(log).createSync(recursive: true);
+    File('$log${Platform.pathSeparator}call-$pid.json').writeAsStringSync(
+      jsonEncode({'cwd': Directory.current.path, 'args': args}),
       flush: true,
     );
   }

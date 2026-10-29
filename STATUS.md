@@ -468,6 +468,11 @@ Last updated: 2026-10-28 by Claude (timelines part 1 session)
       `settings.json` was back to the same SHA-256.
   - Other real spend: two Muse Code probes ($0.0072), one Wonder probe ($0.0084), the bisect
     explanation on Baseten (about $0.002), and the demo turns (2 Claude Code, 2 Muse Code).
+  - Gates on the Mac: dmc analyzer clean, 223 tests, Haven contract 3; Doc analyze clean, 162
+    tests.
+  - CI test flake found and fixed: PR #11's first push run (`cc6c2a4`) failed on Windows. Its
+    pull_request run passed on all four platforms. Three fake `muse` processes appended to one
+    log file at once, and one line was lost. Each fake call now writes its own file.
 
 ## In progress
 

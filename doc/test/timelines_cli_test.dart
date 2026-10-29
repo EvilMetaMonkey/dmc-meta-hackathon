@@ -148,7 +148,7 @@ void main() {
   setUp(() async {
     home = Directory.systemTemp.createTempSync('doc_timelines_home_');
     repo = Directory(p.join(scratch.path, 'repo ${counter++}'))..createSync();
-    museLog = p.join(home.path, 'muse.log');
+    museLog = p.join(home.path, 'muse-calls');
     await git(['init', '-q']);
     file('state.txt').writeAsStringSync('good\n');
     file('old.txt').writeAsStringSync('committed, later deleted\n');
@@ -331,8 +331,8 @@ void main() {
 
     // Muse ran in each worktree with the verified flags, never --yolo.
     final calls = [
-      for (final line in File(museLog).readAsLinesSync())
-        jsonDecode(line) as Map,
+      for (final entry in Directory(museLog).listSync())
+        jsonDecode(File(entry.path).readAsStringSync()) as Map,
     ];
     expect(calls, hasLength(3));
     for (final call in calls) {
@@ -499,7 +499,7 @@ void main() {
     );
     expect('$err', contains('Doc refused the plan'));
     expect(await branches(), isEmpty);
-    expect(File(museLog).existsSync(), isFalse);
+    expect(Directory(museLog).existsSync(), isFalse);
 
     await planner(
       plan([('A', 'FAKE-FIX'), ('B', 'FAKE-WRONG'), ('C', 'FAKE-FAIL')]),
@@ -509,7 +509,7 @@ void main() {
     expect(await doc(['timelines', 'fix it', '--test', goodTest]), 0);
     expect('$out', contains('[y/N] Nothing was started.'));
     expect(await branches(), isEmpty);
-    expect(File(museLog).existsSync(), isFalse);
+    expect(Directory(museLog).existsSync(), isFalse);
     expect(runJson()['status'], 'declined');
     expect(snapshot(), before);
   });
@@ -526,8 +526,8 @@ void main() {
     addTearDown(interrupts.close);
     // Ctrl-C once all three agents are running.
     final started = Timer.periodic(const Duration(milliseconds: 200), (timer) {
-      final log = File(museLog);
-      if (log.existsSync() && log.readAsLinesSync().length >= 3) {
+      final log = Directory(museLog);
+      if (log.existsSync() && log.listSync().length >= 3) {
         timer.cancel();
         interrupts.add(null);
       }
