@@ -13,6 +13,7 @@ import 'model_client.dart';
 import 'model_router.dart';
 import 'summarize.dart';
 import 'talk_command.dart';
+import 'timelines_command.dart';
 import 'usage.dart';
 
 /// Room for reasoning plus a 2-3 sentence answer.
@@ -33,6 +34,19 @@ Commands:
   usage                            Tokens, audio seconds and estimated cost per
                                    provider.
   status                           The latest checkpoints, from dmc's JSON.
+  timelines "<task>" --test "<command>" [--from <cp> --state before|after]
+         [--n 3] [--setup "<command>"] [--link <dir>]... [--max-steps <n>]
+         [--timeout <minutes>] [--yes] [--json]
+                                   Parallel timelines: Muse Wonder plans N
+                                   different approaches, N Muse Code agents
+                                   try them in separate Git worktrees outside
+                                   the repository (from a dmc export of the
+                                   base), and Doc runs the tests in each and
+                                   compares them. Asks before starting.
+  timelines list | show <run-id> | pick <run-id> <k> | clean <run-id>
+                                   pick shows the diff and the git commands to
+                                   bring it in (Doc runs none); clean removes
+                                   worktree folders, never branches.
   talk [--file <audio>] [--yes]    "Hey Doc" push-to-talk (alias: hey). Press
                                    Space or Enter to talk and again to stop
                                    (Esc cancels; 30 s at most). Muse Voice
@@ -119,6 +133,9 @@ ArgParser _parser() => ArgParser()
   ..addFlag('no-explain', negatable: false)
   ..addFlag('json', negatable: false)
   ..addOption('file')
+  ..addOption('n')
+  ..addOption('state')
+  ..addOption('max-steps')
   ..addOption('limit')
   ..addFlag('diff', negatable: false)
   ..addFlag('help', abbr: 'h', negatable: false);
@@ -133,6 +150,7 @@ Future<int> runDoc(
   ChatClient? client,
   String? Function()? readLine,
   VoiceDeps? voice,
+  TimelineDeps? timelines,
 }) async {
   final env = environment ?? Platform.environment;
   final stdoutSink = out ?? stdout;
@@ -197,6 +215,7 @@ Future<int> runDoc(
       client: router.client,
       readLine: readLine,
       voice: voice,
+      timelines: timelines,
     ),
   );
 
@@ -222,6 +241,11 @@ Future<int> runDoc(
         return await runTalkCommand(context, voice ?? const VoiceDeps());
       case 'status':
         return await _status(context);
+      case 'timelines':
+        return await runTimelinesCommand(
+          context,
+          timelines ?? const TimelineDeps(),
+        );
       default:
         log('Unknown command "${args.rest.first}".\n\n$docUsage');
         return 2;
