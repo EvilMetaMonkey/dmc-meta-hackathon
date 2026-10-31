@@ -3,7 +3,7 @@
 The single place to see where the hackathon build stands. **Coding agents keep this file current**;
 the rules are in [AGENTS.md](AGENTS.md#session-status-statusmd).
 
-Last updated: 2026-10-28 by Claude (voice session)
+Last updated: 2026-10-28 by Claude (timelines part 1 session)
 
 ## Done
 
@@ -422,6 +422,61 @@ Last updated: 2026-10-28 by Claude (voice session)
     both the push and pull_request runs for `bf3d9fe`. dmc ran 223 tests (Windows 221 plus 2
     skipped), the Haven contract 3 and Doc 148 on every platform.
 
+- **Parallel timelines, part 1** (`doc timelines`, branch `hackathon/timelines-1`; Doc only,
+  dmc unchanged): base from `dmc checkpoint export`, Muse Wonder plans exactly N approaches
+  (validated JSON), one confirmation with a cost estimate, one Git worktree per approach under
+  Doc's data dir (synced to the base and committed as "timeline base: …", with its own dmc
+  vault), N `muse exec` agents in parallel, each result committed and tested, a side-by-side
+  comparison, run JSON, and `pick` / `list` / `show` / `clean` (branches never deleted). Bisect's
+  shell runner is now shared (`probe_runner.dart`).
+  - Muse Code 1.4.14 headless, verified on the Mac:
+    - Muse's defaults (approval `on-request` with its approval judge, sandbox on, untrusted
+      workspace) let `muse exec` edit files and run sandboxed shell commands, so Doc uses
+      neither `--disable-approval` nor `--trust-workspace`, and never `--yolo`.
+    - `--max-model-steps N` ends with exit 1 and `run.terminal.failed` "… within N step(s)".
+    - `--json` gives `run.usage` (steps, tokens by model) and `run.terminal.*`.
+    - The user-scope dmc hooks fire in worktrees outside the repository.
+    - Muse Wonder accepts a strict `response_format` schema.
+  - Verified by 9 pure tests (`doc/test/timelines_test.dart`: approach validation, tree sync,
+    Muse events and cost, the estimate, numstat, run JSON with archived marks, the comparison
+    table) and 5 CLI tests (`doc/test/timelines_cli_test.dart`). The CLI tests use a compiled
+    fake `muse`, a compiled dmc and temp Git repos:
+    - exactly N approaches, and invalid output rejected after one retry;
+    - worktrees outside the repo with exact base trees;
+    - the working copy and the main `.dmc` vault byte-identical before and after;
+    - one fix, one step-limit failure and one timeout in parallel;
+    - tests per timeline and the comparison text;
+    - pick printing commands and changing nothing; list and show;
+    - clean keeping branches;
+    - Ctrl-C stopping all agents and keeping the worktrees;
+    - "no" starting nothing; `--local` refused; `--from … --state before` and the JSON shape.
+  - Real check on the Mac, 2026-10-28, in a `/tmp` Python repo with both hooks:
+    - Four real turns: Claude Code `subtract_discount`; Muse Code made `round_money` round to one
+      decimal (the bug); then a Claude Code and a Muse Code README edit.
+    - `doc bisect` found the Muse turn in 4 probes.
+    - `doc timelines … --from <it> --state before --max-steps 10`, as specified: tests already
+      pass at that state, so timelines 1 and 3 changed nothing and 2 switched to `Decimal`. All
+      passed; 5/9/8 steps; Muse Code $0.0151, Wonder $0.0251; 1:24 wall time.
+    - The same from `--state after` (the broken state): three different fixes (+1 −1 `round(…, 2)`,
+      +3 −1 `Decimal`, +7 −1 integer cents), all passing; 5/6/8 steps; Muse Code $0.0110,
+      Wonder $0.0162; 0:52 wall time.
+    - `pick 1` printed the diff and commands; the working copy was unchanged and the patch
+      passed `git apply --check`.
+    - Each worktree vault got one agent-turn checkpoint, and the main vault stayed at 4.
+    - `clean` removed the six worktree folders and kept the six branches. Then the repo (and with
+      it the branches) and the run records were removed. Hooks were uninstalled; Muse
+      `settings.json` was back to the same SHA-256.
+  - Other real spend: two Muse Code probes ($0.0072), one Wonder probe ($0.0084), the bisect
+    explanation on Baseten (about $0.002), and the demo turns (2 Claude Code, 2 Muse Code).
+  - Gates on the Mac: dmc analyzer clean, 223 tests, Haven contract 3; Doc analyze clean, 162
+    tests.
+  - CI test flake found and fixed: PR #11's first push run (`cc6c2a4`) failed on Windows. Its
+    pull_request run passed on all four platforms. Three fake `muse` processes appended to one
+    log file at once, and one line was lost. Each fake call now writes its own file.
+  - PR #11 (`hackathon/timelines-1`): CI passed on ubuntu, macOS, macOS Intel and Windows in
+    both the push and pull_request runs for `5ecf7cd`. dmc ran 223 tests (Windows 221 plus 2
+    skipped), the Haven contract 3 and Doc 162 on every platform.
+
 ## In progress
 
 - Nothing yet.
@@ -457,6 +512,16 @@ Last updated: 2026-10-28 by Claude (voice session)
 - Lesson drafts can only explain *why* a change failed if someone says so (the "What went
   wrong?" answer or `--note`); dmc records what changed, not why. Without it the draft now says
   "Not stated" and cannot be approved until edited.
+- Timelines: the planner is told the task, but "fix the bug" from the *before*-state of the first
+  bad turn has nothing to fix, since that state passes by definition (seen in the real run).
+  From the before-state, ask for the bad turn's goal done in a way the tests accept; from the
+  after-state, ask for the fix. A timed-out agent is killed with SIGTERM/SIGKILL on its own
+  process; shell children it started may outlive it. The cost estimate is based on two probes
+  (about 28k input tokens per step) and Muse Code bills its own account, so Doc only reports
+  costs, it does not budget them. `pick`'s `git merge` option also brings the "timeline base"
+  commit; the patch option moves only the timeline's change. Timelines need the dmc workspace to
+  be the Git top level. The timelines CLI tests run on Windows CI, but Muse Code on Windows
+  is not verified.
 - **Voice, not yet verified with a person:** no live `doc talk` with the microphone was run (this
   session had no interactive terminal and nobody spoke), so the macOS microphone permission
   prompt, the raw-mode key handling and the live partial line are tested with fakes only. The
@@ -485,8 +550,8 @@ Last updated: 2026-10-28 by Claude (voice session)
 
 Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 
-1. Parallel timelines, part 1: from the last good checkpoint, three Muse Code agents try three
-   approaches in separate worktrees (planner and judge on Muse Wonder).
+1. Timelines part 2: Muse Wonder judges the diffs and test results (the `judge` role), and demo
+   integration (bisect → timelines → pick in one flow, with the lesson).
 2. A live `doc talk` with Mike at the microphone (first-run permission prompt, Space/Enter,
    Esc), ideally with SoX installed (`brew install sox`).
 3. Then, per the spec's schedule: demo and README (Nov 3), submit (Nov 4).
@@ -500,6 +565,12 @@ Submissions are due Nov 4 at 9:00 PM ET. The build started on Oct 26.
 ## Session log
 
 Newest first. One entry per session: date, agent, what changed, and anything left half-done.
+
+- 2026-10-28 · Claude · Timelines part 1 (branch `hackathon/timelines-1`): verified Muse Code's
+  headless flags and JSON events, added `doc timelines` (Wonder plans, worktrees from dmc exports,
+  parallel `muse exec`, tests, comparison, pick/list/show/clean) and the shared probe runner.
+  Verified with tests and two real 3-timeline runs after a real bisect (about $0.09 in all,
+  including probes). Left open: Wonder judging (part 2).
 
 - 2026-10-28 · Claude · Voice (branch `hackathon/voice`): lesson drafts stop inventing reasons;
   `doc talk` push-to-talk on Meta's realtime transcription (protocol checked against Meta's docs,

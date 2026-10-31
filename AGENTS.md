@@ -127,6 +127,15 @@ The most important product qualities are:
   it into one Doc command, and that command runs in-process only after "Run it? [y/N]" (`--yes`
   never answers it for restore or bisect). The WebSocket client is behind `TranscriptionClient`.
   `--local` refuses it. Usage records billed audio seconds.
+- **Parallel timelines** (`doc timelines`, part 1) never touch the working copy or the main
+  vault. The base comes from `dmc checkpoint export`. Each timeline is a Git worktree under
+  Doc's data dir (outside the repo), on branch `doc/timeline/<run>/<k>`, with its own `dmc
+  init`. The planner (Muse Wonder) only proposes approaches, as validated JSON
+  (`parseTimelineApproaches`). Agents run as `muse exec … --max-model-steps N
+  --disable-web-tools --json` with Muse's default approval and sandbox (never `--yolo` or
+  `--disable-approval`). Results are committed on their branches and tested with bisect's probe
+  runner. `pick` prints git commands and runs nothing in the repository; `clean` removes
+  worktree folders, never branches. Wonder's judging is part 2.
 - **`doc restore` only drives dmc.** It previews with `dmc checkpoint restore <id> --json`, applies
   with `--apply` after the user agrees, never forces a conflict or recovery, then offers a lesson.
   To show the model the undone work, Doc exports the checkpoint's states with
@@ -321,6 +330,8 @@ Use `docs/TESTER-READINESS-AUDIT.md` as the original audit and the Phase 2/3 han
   `dart run bin/doc.dart restore <checkpoint-id> [--yes] [--no-lesson]`,
   `dart run bin/doc.dart restore "<request>" [--limit <n>] [--diff] [--yes] [--json]`,
   `dart run bin/doc.dart talk [--file <audio>] [--yes]`, `dart run bin/doc.dart status`,
+  `dart run bin/doc.dart timelines "<task>" --test "<command>" [--from <cp> --state before|after] [--n 3] [--max-steps <n>]`,
+  `dart run bin/doc.dart timelines list|show <run>|pick <run> <k>|clean <run>`,
   `dart run bin/doc.dart lesson draft --last-restore`,
   `dart run bin/doc.dart bisect --test "<command>" [--setup …] [--link <dir>]… [--json]`. Its gate: `dart pub get --enforce-lockfile`,
   `dart analyze --fatal-infos`, `DMC_TEST_BIN=../build/dmc/bundle/bin/dmc dart test --concurrency=1`.
